@@ -5,4 +5,4 @@ mod handle_manager;
 mod index_manager;
 
 pub use handle_manager::{Handle, HandleArray, HandleManager};
-pub use index_manager::IndexArray;
+pub use index_manager::{IndexArray, IndexManager};
