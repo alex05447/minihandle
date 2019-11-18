@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Debug, Formatter};
 use std::num::NonZeroU64;
 
 /// Handle, a.k.a. weak reference, a.k.a. generational index.
@@ -16,7 +16,7 @@ use std::num::NonZeroU64;
 /// |   metadata  |  generation |       index       | reserved |
 /// |:-----------:|:-----------:|:-----------------:|:--------:|
 /// |   16 bits   |   16 bits   |      30 bits      |  2 bits  |
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Handle(Option<NonZeroU64>);
 
 impl Display for Handle {
@@ -32,6 +32,12 @@ impl Display for Handle {
         } else {
             write!(f, "[invalid handle]")
         }
+    }
+}
+
+impl Debug for Handle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        <Self as Display>::fmt(self, f)
     }
 }
 
