@@ -168,13 +168,13 @@ impl<T> HandleArray<T> {
 impl<T> std::ops::Deref for HandleArray<T> {
     type Target = [T];
 
-    fn deref(&self) -> &[T] {
+    fn deref(&self) -> &Self::Target {
         self.array.deref()
     }
 }
 
 impl<T> std::ops::DerefMut for HandleArray<T> {
-    fn deref_mut(&mut self) -> &mut [T] {
+    fn deref_mut(&mut self) -> &mut Self::Target {
         self.array.deref_mut()
     }
 }

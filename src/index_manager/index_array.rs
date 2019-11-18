@@ -157,7 +157,7 @@ where
 {
     type Target = [T];
 
-    fn deref(&self) -> &[T] {
+    fn deref(&self) -> &Self::Target {
         self.array.deref()
     }
 }
@@ -166,7 +166,7 @@ impl<T, I> std::ops::DerefMut for IndexArray<T, I>
 where
     I: PrimInt + Unsigned + FromPrimitive,
 {
-    fn deref_mut(&mut self) -> &mut [T] {
+    fn deref_mut(&mut self) -> &mut Self::Target {
         self.array.deref_mut()
     }
 }
