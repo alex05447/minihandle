@@ -7,10 +7,12 @@ use num_traits::{PrimInt, Unsigned};
 /// and requires just a simple unique index allocator the `IndexManager` provides.
 ///
 /// [`HandleManager`]: struct.HandleManager.html
+#[derive(Clone)]
 pub struct IndexManager<I>
 where
     I: PrimInt + Unsigned,
 {
+    num_indices: u32,
     next_index: I,
     free_indices: Vec<I>,
 }
@@ -24,6 +26,7 @@ where
     /// [`IndexManager`]: struct.IndexManager.html
     pub fn new() -> Self {
         Self {
+            num_indices: 0,
             next_index: I::zero(),
             free_indices: Vec::new(),
         }
@@ -45,6 +48,8 @@ where
             .checked_add(&I::one())
             .expect("Index overflow.");
 
+        self.num_indices += 1;
+
         index
     }
 
@@ -55,8 +60,30 @@ where
     /// NOTE - this only checks the same `index` is not freed more than once in debug configuration.
     pub fn destroy(&mut self, index: I) {
         debug_assert!(!self.free_indices.contains(&index));
+        debug_assert!(self.num_indices > 0);
 
+        self.num_indices -= 1;
         self.free_indices.push(index);
+    }
+
+    /// Returns the current number of valid [`create`]'d indices by this [`IndexManager`].
+    ///
+    /// [`create`]: #method.create
+    /// [`IndexManager`]: struct.IndexManager.html
+    pub fn len(&self) -> u32 {
+        self.num_indices
+    }
+
+    /// Clears the [`IndexManager`], invalidating the allocated indices
+    /// (but only until they are allocated again).
+    ///
+    /// Has no effect on the allocated capacity of the internal data structures.
+    ///
+    /// [`IndexManager`]: struct.IndexManager.html
+    pub fn clear(&mut self) {
+        self.num_indices = 0;
+        self.next_index = I::zero();
+        self.free_indices.clear();
     }
 }
 

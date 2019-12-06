@@ -106,6 +106,18 @@ impl HandleManager {
     pub fn len(&self) -> u32 {
         self.num_handles
     }
+
+    /// Clears the [`HandleManager`], invalidating the allocated handles
+    /// (but only until they are allocated again).
+    ///
+    /// Has no effect on the allocated capacity of the internal data structures.
+    ///
+    /// [`HandleManager`]: struct.HandleManager.html
+    pub fn clear(&mut self) {
+        self.num_handles = 0;
+        self.generations.clear();
+        self.free_indices.clear();
+    }
 }
 
 #[cfg(test)]

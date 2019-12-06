@@ -57,6 +57,23 @@ where
         index
     }
 
+    /// Inserts the `value` in the array, returning the index which may be used to
+    /// [`get`] / [`get_mut`] / [`remove`] it later,
+    /// and the mutable reference to the inserted `value`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if enough objects are inserted to overflow the underlying index type.
+    ///
+    /// [`get`]: #method.get
+    /// [`get_mut`]: #method.get_mut
+    /// [`remove`]: #method.remove
+    pub fn insert_entry(&mut self, value: T) -> (I, &mut T) {
+        let index = self.insert(value);
+
+        (index, self.array.last_mut().unwrap())
+    }
+
     /// Returns the reference to the `value` which was [`insert`]'ed
     /// when this index was returned.
     ///
@@ -136,9 +153,10 @@ where
         self.array.swap_remove(object_index_usize)
     }
 
-    /// Returns the current number of [`insert`]'ed `T`'s in this [`IndexArray`]
+    /// Returns the current number of [`insert`]'ed `T`'s in this [`IndexArray`].
     ///
     /// [`insert`]: #method.insert
+    /// [`IndexArray`]: struct.IndexArray.html
     pub fn len(&self) -> usize {
         self.array.len()
     }
@@ -148,6 +166,17 @@ where
     /// [`len`]: #method.len
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Clears the [`IndexArray`], removing all values.
+    ///
+    /// Has no effect on the allocated capacity of the internal data structures.
+    ///
+    /// [`IndexArray`]: struct.IndexArray.html
+    pub fn clear(&mut self) {
+        self.index_manager.clear();
+        self.indices.clear();
+        self.array.clear();
     }
 }
 

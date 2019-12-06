@@ -58,6 +58,24 @@ impl<T> HandleArray<T> {
         handle
     }
 
+    /// Inserts the `value` in the array, returning the [`Handle`] which may be used to
+    /// [`get`] / [`get_mut`] / [`remove`] it later,
+    /// and the mutable reference to the inserted `value`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if more than `std::u32::MAX` objects are inserted.
+    ///
+    /// [`Handle`]: struct.Handle.html
+    /// [`get`]: #method.get
+    /// [`get_mut`]: #method.get_mut
+    /// [`remove`]: #method.remove
+    pub fn insert_entry(&mut self, value: T) -> (Handle, &mut T) {
+        let handle = self.insert(value);
+
+        (handle, self.array.last_mut().unwrap())
+    }
+
     /// Returns `true` if the [`Handle`] is valid - i.e. it was previously returned by [`insert`]
     /// and has not been [`remove`]'ed yet.
     ///
@@ -162,6 +180,15 @@ impl<T> HandleArray<T> {
     /// [`len`]: #method.len
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Clears the handle array, removing all values.
+    ///
+    /// Has no effect on the allocated capacity of the internal data structures.
+    pub fn clear(&mut self) {
+        self.handle_manager.clear();
+        self.indices.clear();
+        self.array.clear();
     }
 }
 
