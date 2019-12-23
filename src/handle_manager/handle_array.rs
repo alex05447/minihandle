@@ -83,6 +83,14 @@ impl<T> HandleArray<T> {
     /// [`insert`]: #method.insert
     /// [`remove`]: #method.remove
     pub fn is_valid(&self, handle: Handle) -> bool {
+        if let Some(metadata) = handle.metadata() {
+            if metadata != self.metadata {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
         self.handle_manager.is_valid(handle)
     }
 
@@ -94,7 +102,7 @@ impl<T> HandleArray<T> {
     /// [`is_valid`]: #method.is_valid
     /// [`insert`]: #method.insert
     pub fn get(&self, handle: Handle) -> Option<&T> {
-        if !self.handle_manager.is_valid(handle) {
+        if !self.is_valid(handle) {
             None
         } else {
             let index = handle.index().expect("Invalid handle.") as usize;
@@ -115,7 +123,7 @@ impl<T> HandleArray<T> {
     /// [`is_valid`]: #method.is_valid
     /// [`insert`]: #method.insert
     pub fn get_mut(&mut self, handle: Handle) -> Option<&mut T> {
-        if !self.handle_manager.is_valid(handle) {
+        if !self.is_valid(handle) {
             None
         } else {
             let index = handle.index().expect("Invalid handle.") as usize;
@@ -136,7 +144,7 @@ impl<T> HandleArray<T> {
     /// [`is_valid`]: #method.is_valid
     /// [`insert`]: #method.insert
     pub fn remove(&mut self, handle: Handle) -> Option<T> {
-        if !self.handle_manager.is_valid(handle) {
+        if !self.is_valid(handle) {
             None
         } else {
             let index = handle.index().expect("Invalid handle.") as usize;
@@ -203,6 +211,15 @@ impl<T> std::ops::Deref for HandleArray<T> {
 impl<T> std::ops::DerefMut for HandleArray<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.array.deref_mut()
+    }
+}
+
+impl<T> std::iter::IntoIterator for HandleArray<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.array.into_iter()
     }
 }
 
