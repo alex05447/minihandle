@@ -15,7 +15,7 @@ pub struct HandleArray<T> {
 }
 
 impl<T> HandleArray<T> {
-    /// Create a new [`HandleArray`].
+    /// Creates a new [`HandleArray`].
     ///
     /// `min_num_free_indices` - this many [`Handle`]'s need to be freed before
     /// the oldest freed index will be reused with a new generation (sequence).
@@ -52,7 +52,7 @@ impl<T> HandleArray<T> {
             self.indices.resize(index + 1, std::u32::MAX);
         }
 
-        self.indices[index] = self.array.len() as u32;
+        *unsafe { self.indices.get_unchecked_mut(index) } = self.array.len() as u32;
         self.array.push(value);
 
         handle
@@ -77,11 +77,11 @@ impl<T> HandleArray<T> {
     }
 
     /// Returns `true` if the [`Handle`] is valid - i.e. it was previously returned by [`insert`]
-    /// and has not been [`remove`]'ed yet.
+    /// and has not been [`removed`] yet.
     ///
     /// [`Handle`]: struct.Handle.html
     /// [`insert`]: #method.insert
-    /// [`remove`]: #method.remove
+    /// [`removed`]: #method.remove
     pub fn is_valid(&self, handle: Handle) -> bool {
         if let Some(metadata) = handle.metadata() {
             if metadata != self.metadata {
@@ -94,70 +94,70 @@ impl<T> HandleArray<T> {
         self.handle_manager.is_valid(handle)
     }
 
-    /// If the [`Handle`] [`is_valid`], returns the reference to the `value` which was [`insert`]'ed
+    /// If the [`Handle`] [`is_valid`], returns the reference to the `value` which was [`inserted`]
     /// when this handle was returned.
     /// Else returns `None`.
     ///
     /// [`Handle`]: struct.Handle.html
     /// [`is_valid`]: #method.is_valid
-    /// [`insert`]: #method.insert
+    /// [`inserted`]: #method.insert
     pub fn get(&self, handle: Handle) -> Option<&T> {
         if !self.is_valid(handle) {
             None
         } else {
             let index = handle.index().expect("Invalid handle.") as usize;
+
             debug_assert!(index < self.indices.len());
+            let object_index = *unsafe { self.indices.get_unchecked(index) };
 
-            let object_index = self.indices[index];
             debug_assert!((object_index as usize) < self.array.len());
-
-            Some(&self.array[object_index as usize])
+            Some(unsafe { self.array.get_unchecked(object_index as usize) })
         }
     }
 
-    /// If the [`Handle`] [`is_valid`], returns the mutable reference to the `value` which was [`insert`]'ed
+    /// If the [`Handle`] [`is_valid`], returns the mutable reference to the `value` which was [`inserted`]
     /// when this handle was returned.
     /// Else returns `None`.
     ///
     /// [`Handle`]: struct.Handle.html
     /// [`is_valid`]: #method.is_valid
-    /// [`insert`]: #method.insert
+    /// [`inserted`]: #method.insert
     pub fn get_mut(&mut self, handle: Handle) -> Option<&mut T> {
         if !self.is_valid(handle) {
             None
         } else {
             let index = handle.index().expect("Invalid handle.") as usize;
+
             debug_assert!(index < self.indices.len());
+            let object_index = *unsafe { self.indices.get_unchecked(index) };
 
-            let object_index = self.indices[index];
             debug_assert!((object_index as usize) < self.array.len());
-
-            Some(&mut self.array[object_index as usize])
+            Some(unsafe { self.array.get_unchecked_mut(object_index as usize) })
         }
     }
 
-    /// If the [`Handle`] [`is_valid`], removes and returns the `value` which was [`insert`]'ed
+    /// If the [`Handle`] [`is_valid`], removes and returns the `value` which was [`inserted`]
     /// when this handle was returned, and invalidates the handle.
     /// Else returns `None`.
     ///
     /// [`Handle`]: struct.Handle.html
     /// [`is_valid`]: #method.is_valid
-    /// [`insert`]: #method.insert
+    /// [`inserted`]: #method.insert
     pub fn remove(&mut self, handle: Handle) -> Option<T> {
         if !self.is_valid(handle) {
             None
         } else {
             let index = handle.index().expect("Invalid handle.") as usize;
+
             debug_assert!(index < self.indices.len());
+            let object_index = *unsafe { self.indices.get_unchecked(index) };
 
-            let object_index = self.indices[index];
             debug_assert!((object_index as usize) < self.array.len());
-
             let destroyed = self.handle_manager.destroy(handle);
             debug_assert!(destroyed);
 
             // Move the last object to the free slot and patch its index in the index array.
-            self.indices[index] = std::u32::MAX;
+            *unsafe { self.indices.get_unchecked_mut(index) } = std::u32::MAX;
 
             let last_object_index = (self.array.len() - 1) as u32;
 
@@ -167,16 +167,17 @@ impl<T> HandleArray<T> {
                     .iter()
                     .position(|index| *index == last_object_index)
                     .unwrap();
-                self.indices[last_index] = object_index;
+                debug_assert!(last_index < self.indices.len());
+                *unsafe { self.indices.get_unchecked_mut(last_index) } = object_index;
             }
 
             Some(self.array.swap_remove(object_index as usize))
         }
     }
 
-    /// Returns the current number of valid [`insert`]'ed [`Handle`]'s / `T`'s in this [`HandleArray`]
+    /// Returns the current number of valid [`inserted`] [`Handle`]'s / objects in this [`HandleArray`]
     ///
-    /// [`insert`]: #method.insert
+    /// [`inserted`]: #method.insert
     /// [`Handle`]: struct.Handle.html
     /// [`HandleArray`]: struct.HandleArray.html
     pub fn len(&self) -> usize {

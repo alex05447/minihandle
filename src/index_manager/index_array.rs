@@ -22,7 +22,7 @@ impl<T, I> IndexArray<T, I>
 where
     I: PrimInt + Unsigned + FromPrimitive,
 {
-    /// Create a new [`IndexArray`].
+    /// Creates a new [`IndexArray`].
     ///
     /// [`IndexArray`]: struct.IndexArray.html
     pub fn new() -> Self {
@@ -51,7 +51,8 @@ where
             self.indices.resize(index_usize + 1, I::max_value());
         }
 
-        self.indices[index_usize] = I::from_usize(self.array.len()).unwrap();
+        *unsafe { self.indices.get_unchecked_mut(index_usize) } =
+            I::from_usize(self.array.len()).unwrap();
         self.array.push(value);
 
         index
@@ -74,7 +75,7 @@ where
         (index, self.array.last_mut().unwrap())
     }
 
-    /// Returns the reference to the `value` which was [`insert`]'ed
+    /// Returns the reference to the `value` which was [`inserted`]
     /// when this index was returned.
     ///
     /// NOTE - this does not check whether the `index` is valid.
@@ -83,19 +84,19 @@ where
     ///
     /// Panics if `index` is out of bounds.
     ///
-    /// [`insert`]: #method.insert
+    /// [`inserted`]: #method.insert
     pub fn get(&self, index: I) -> &T {
         let index_usize = index.to_usize().unwrap();
+
         assert!(index_usize < self.indices.len(), "Index out of bounds.");
-
-        let object_index = self.indices[index_usize];
+        let object_index = *unsafe { self.indices.get_unchecked(index_usize) };
         let object_index_usize = object_index.to_usize().unwrap();
-        assert!(object_index_usize < self.array.len(), "Invalid index.");
 
-        &self.array[object_index_usize]
+        assert!(object_index_usize < self.array.len(), "Invalid index.");
+        unsafe { self.array.get_unchecked(object_index_usize) }
     }
 
-    /// Returns the mutable reference to the `value` which was [`insert`]'ed
+    /// Returns the mutable reference to the `value` which was [`inserted`]
     /// when this index was returned.
     ///
     /// NOTE - this does not check whether the `index` is valid.
@@ -104,19 +105,19 @@ where
     ///
     /// Panics if `index` is out of bounds.
     ///
-    /// [`insert`]: #method.insert
+    /// [`inserted`]: #method.insert
     pub fn get_mut(&mut self, index: I) -> &mut T {
         let index_usize = index.to_usize().unwrap();
+
         assert!(index_usize < self.indices.len(), "Index out of bounds.");
-
-        let object_index = self.indices[index_usize];
+        let object_index = *unsafe { self.indices.get_unchecked(index_usize) };
         let object_index_usize = object_index.to_usize().unwrap();
-        assert!(object_index_usize < self.array.len(), "Invalid index.");
 
-        &mut self.array[object_index_usize]
+        assert!(object_index_usize < self.array.len(), "Invalid index.");
+        unsafe { self.array.get_unchecked_mut(object_index_usize) }
     }
 
-    /// Removes and returns the `value` which was [`insert`]'ed
+    /// Removes and returns the `value` which was [`inserted`]
     /// when this index was returned, and frees the index.
     ///
     /// NOTE - this does not check whether the `index` is valid.
@@ -125,19 +126,19 @@ where
     ///
     /// Panics if `index` is out of bounds.
     ///
-    /// [`insert`]: #method.insert
+    /// [`inserted`]: #method.insert
     pub fn remove(&mut self, index: I) -> T {
         let index_usize = index.to_usize().unwrap();
+
         assert!(index_usize < self.indices.len(), "Index out of bounds.");
-
-        let object_index = self.indices[index_usize];
+        let object_index = *unsafe { self.indices.get_unchecked(index_usize) };
         let object_index_usize = object_index.to_usize().unwrap();
-        assert!(object_index_usize < self.array.len(), "Invalid index.");
 
+        assert!(object_index_usize < self.array.len(), "Invalid index.");
         self.index_manager.destroy(index);
 
         // Move the last object to the free slot and patch its index in the index array.
-        self.indices[index_usize] = I::max_value();
+        *unsafe { self.indices.get_unchecked_mut(index_usize) } = I::max_value();
 
         let last_object_index = I::from_usize(self.array.len() - 1).unwrap();
 
@@ -147,15 +148,16 @@ where
                 .iter()
                 .position(|index| *index == last_object_index)
                 .unwrap();
-            self.indices[last_index] = object_index;
+            debug_assert!(last_index < self.indices.len());
+            *unsafe { self.indices.get_unchecked_mut(last_index) } = object_index;
         }
 
         self.array.swap_remove(object_index_usize)
     }
 
-    /// Returns the current number of [`insert`]'ed `T`'s in this [`IndexArray`].
+    /// Returns the current number of [`inserted`] indices/objects in this [`IndexArray`].
     ///
-    /// [`insert`]: #method.insert
+    /// [`inserted`]: #method.insert
     /// [`IndexArray`]: struct.IndexArray.html
     pub fn len(&self) -> usize {
         self.array.len()

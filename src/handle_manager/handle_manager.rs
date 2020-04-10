@@ -13,7 +13,7 @@ pub struct HandleManager {
 }
 
 impl HandleManager {
-    /// Create a new [`HandleManager`].
+    /// Creates a new [`HandleManager`].
     ///
     /// `min_num_free_indices` - this many [`Handle`]'s need to be freed before
     /// the oldest freed index will be reused with a new generation (sequence).
@@ -38,7 +38,7 @@ impl HandleManager {
     /// [`Handle`]: struct.Handle.html
     pub fn create(&mut self, metadata: u16) -> Handle {
         let index = if self.free_indices.len() as u32 > self.min_num_free_indices {
-            self.free_indices.pop_front().unwrap()
+            self.free_indices.pop_front().unwrap() as usize
         } else {
             assert!(
                 self.generations.len() < std::u32::MAX as usize,
@@ -46,22 +46,23 @@ impl HandleManager {
             );
 
             self.generations.push(0);
-            (self.generations.len() - 1) as u32
+            (self.generations.len() - 1) as usize
         };
 
         self.num_handles += 1;
 
-        let generation = self.generations[index as usize];
+        debug_assert!(index < self.generations.len());
+        let generation = *unsafe { self.generations.get_unchecked(index) };
 
-        Handle::new(index, generation, metadata)
+        Handle::new(index as u32, generation, metadata)
     }
 
-    /// Returns `true` if the [`Handle`] is valid - i.e. it was previously [`create`]'d by this [`HandleManager`]
-    /// and has not been [`destroy`]'ed yet.
+    /// Returns `true` if the [`Handle`] is valid - i.e. it was previously [`created`] by this [`HandleManager`]
+    /// and has not been [`destroyed`] yet.
     ///
-    /// [`create`]: #method.create
+    /// [`created`]: #method.create
     /// [`Handle`]: struct.Handle.html
-    /// [`destroy`]: #method.destroy
+    /// [`destroyed`]: #method.destroy
     /// [`HandleManager`]: struct.HandleManager.html
     pub fn is_valid(&self, handle: Handle) -> bool {
         if let Some(index) = handle.index() {
@@ -70,7 +71,7 @@ impl HandleManager {
                 false
             } else {
                 let generation = handle.generation().expect("Invalid handle.");
-                self.generations[index] == generation
+                *unsafe { self.generations.get_unchecked(index) } == generation
             }
         } else {
             false
@@ -78,8 +79,10 @@ impl HandleManager {
     }
 
     /// Destoys the `handle`, i.e. makes [`is_valid`] by this [`HandleManager`] return `false` for it.
+    /// Returns `true` if the `handle` was [`valid`] and was destroyed; else return `false`.
     ///
     /// [`is_valid`]: #method.is_valid
+    /// [`valid`]: #method.is_valid
     /// [`HandleManager`]: struct.HandleManager.html
     pub fn destroy(&mut self, handle: Handle) -> bool {
         if let Some(index) = handle.index() {
@@ -88,7 +91,7 @@ impl HandleManager {
             if index >= self.generations.len() {
                 false
             } else {
-                self.generations[index] += 1;
+                *unsafe { self.generations.get_unchecked_mut(index) } += 1;
                 self.free_indices.push_back(index as u32);
                 self.num_handles -= 1;
                 true
@@ -98,9 +101,9 @@ impl HandleManager {
         }
     }
 
-    /// Returns the current number of valid [`create`]'d [`Handle`]'s by this [`HandleManager`].
+    /// Returns the current number of valid [`created`] [`Handle`]'s by this [`HandleManager`].
     ///
-    /// [`create`]: #method.create
+    /// [`created`]: #method.create
     /// [`Handle`]: struct.Handle.html
     /// [`HandleManager`]: struct.HandleManager.html
     pub fn len(&self) -> u32 {

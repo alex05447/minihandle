@@ -1,4 +1,4 @@
-use std::fmt::{Display, Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::num::NonZeroU64;
 
 /// Handle, a.k.a. weak reference, a.k.a. generational index.
@@ -80,7 +80,12 @@ impl Handle {
     ///
     /// Panics if `index` value overflows `30` bits.
     pub fn new(index: u32, generation: u16, metadata: u16) -> Self {
-        assert!((index as u64) < INDEX_MASK, "Index overflow - index is {}, max value is {}.", index, INDEX_MASK);
+        assert!(
+            (index as u64) < INDEX_MASK,
+            "Index overflow - index is {}, max value is {}.",
+            index,
+            INDEX_MASK
+        );
 
         let handle = 1
             | (index as u64 & INDEX_MASK) << INDEX_OFFSET
@@ -120,68 +125,41 @@ impl Handle {
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn index(&self) -> Option<u32> {
-        if let Some(handle) = self.0 {
-            Some(
-                read_bits(
-                    handle.get(),
-                    INDEX_BITS,
-                    INDEX_OFFSET
-                ) as u32
-            )
-        } else {
-            None
-        }
+        self.0
+            .map(|h| read_bits(h.get(), INDEX_BITS, INDEX_OFFSET) as u32)
     }
 
     /// Extracts the [`Handle`]'s generation part, or `None` if the handle is not valid.
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn generation(&self) -> Option<u16> {
-        if let Some(handle) = self.0 {
-            Some(
-                read_bits(
-                    handle.get(),
-                    GENERATION_BITS,
-                    GENERATION_OFFSET
-                ) as u16
-            )
-        } else {
-            None
-        }
+        self.0
+            .map(|h| read_bits(h.get(), GENERATION_BITS, GENERATION_OFFSET) as u16)
     }
 
     /// Extracts the [`Handle`]'s metadata part, or `None` if the handle is not valid.
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn metadata(&self) -> Option<u16> {
-        if let Some(handle) = self.0 {
-            Some(
-                read_bits(
-                    handle.get(),
-                    METADATA_BITS,
-                    METADATA_OFFSET
-                ) as u16
-            )
-        } else {
-            None
-        }
+        self.0
+            .map(|h| read_bits(h.get(), METADATA_BITS, METADATA_OFFSET) as u16)
     }
 
-/*
-    fn reserved(&self) -> Option<u8> {
-        if let Some(handle) = self.0 {
-            Some(
-                read_bits(
-                    handle.get(),
-                    RESERVED_BITS,
-                    RESERVED_OFFSET
-                ) as u8
-            )
-        } else {
-            None
+    /*
+        fn reserved(&self) -> Option<u8> {
+            if let Some(handle) = self.0 {
+                Some(
+                    read_bits(
+                        handle.get(),
+                        RESERVED_BITS,
+                        RESERVED_OFFSET
+                    ) as u8
+                )
+            } else {
+                None
+            }
         }
-    }
-*/
+    */
 }
 
 fn read_bits(source: u64, num_bits_to_read: u64, offset: u64) -> u64 {
