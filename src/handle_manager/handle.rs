@@ -118,7 +118,7 @@ impl Handle {
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn to_ptr(&self) -> Option<u64> {
-        self.0.map(|handle| handle.get())
+        self.0.map(NonZeroU64::get)
     }
 
     /// Extracts the [`Handle`]'s index part, or `None` if the handle is not valid.
@@ -126,7 +126,7 @@ impl Handle {
     /// [`Handle`]: struct.Handle.html
     pub fn index(&self) -> Option<u32> {
         self.0
-            .map(|h| read_bits(h.get(), INDEX_BITS, INDEX_OFFSET) as u32)
+            .map(Self::index_impl)
     }
 
     /// Extracts the [`Handle`]'s generation part, or `None` if the handle is not valid.
@@ -134,7 +134,7 @@ impl Handle {
     /// [`Handle`]: struct.Handle.html
     pub fn generation(&self) -> Option<u16> {
         self.0
-            .map(|h| read_bits(h.get(), GENERATION_BITS, GENERATION_OFFSET) as u16)
+            .map(Self::generation_impl)
     }
 
     /// Extracts the [`Handle`]'s metadata part, or `None` if the handle is not valid.
@@ -142,7 +142,30 @@ impl Handle {
     /// [`Handle`]: struct.Handle.html
     pub fn metadata(&self) -> Option<u16> {
         self.0
-            .map(|h| read_bits(h.get(), METADATA_BITS, METADATA_OFFSET) as u16)
+            .map(Self::metadata_impl)
+    }
+
+    /// Extracts the [`Handle`]'s index, generation and metadata parts, in that order, or `None` if the handle is not valid.
+    ///
+    /// [`Handle`]: struct.Handle.html
+    pub fn unwrap(&self) -> Option<(u32, u16, u16)> {
+        self.0.map(|h| (
+            Self::index_impl(h),
+            Self::generation_impl(h),
+            Self::metadata_impl(h),
+        ))
+    }
+
+    fn index_impl(h: NonZeroU64) -> u32 {
+        read_bits(h.get(), INDEX_BITS, INDEX_OFFSET) as u32
+    }
+
+    fn generation_impl(h: NonZeroU64) -> u16 {
+        read_bits(h.get(), GENERATION_BITS, GENERATION_OFFSET) as u16
+    }
+
+    fn metadata_impl(h: NonZeroU64) -> u16 {
+        read_bits(h.get(), METADATA_BITS, METADATA_OFFSET) as u16
     }
 
     /*

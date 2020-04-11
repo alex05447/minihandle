@@ -38,7 +38,7 @@ impl HandleManager {
     /// [`Handle`]: struct.Handle.html
     pub fn create(&mut self, metadata: u16) -> Handle {
         let index = if self.free_indices.len() as u32 > self.min_num_free_indices {
-            self.free_indices.pop_front().unwrap() as usize
+            self.free_indices.pop_front().unwrap()
         } else {
             assert!(
                 self.generations.len() < std::u32::MAX as usize,
@@ -46,15 +46,15 @@ impl HandleManager {
             );
 
             self.generations.push(0);
-            (self.generations.len() - 1) as usize
+            (self.generations.len() - 1) as u32
         };
 
         self.num_handles += 1;
 
-        debug_assert!(index < self.generations.len());
-        let generation = *unsafe { self.generations.get_unchecked(index) };
+        debug_assert!((index as usize) < self.generations.len());
+        let generation = *unsafe { self.generations.get_unchecked(index as usize) };
 
-        Handle::new(index as u32, generation, metadata)
+        Handle::new(index, generation, metadata)
     }
 
     /// Returns `true` if the [`Handle`] is valid - i.e. it was previously [`created`] by this [`HandleManager`]
@@ -65,17 +65,7 @@ impl HandleManager {
     /// [`destroyed`]: #method.destroy
     /// [`HandleManager`]: struct.HandleManager.html
     pub fn is_valid(&self, handle: Handle) -> bool {
-        if let Some(index) = handle.index() {
-            let index = index as usize;
-            if index >= self.generations.len() {
-                false
-            } else {
-                let generation = handle.generation().expect("Invalid handle.");
-                *unsafe { self.generations.get_unchecked(index) } == generation
-            }
-        } else {
-            false
-        }
+        self.is_valid_impl(handle).is_some()
     }
 
     /// Destoys the `handle`, i.e. makes [`is_valid`] by this [`HandleManager`] return `false` for it.
@@ -85,14 +75,13 @@ impl HandleManager {
     /// [`valid`]: #method.is_valid
     /// [`HandleManager`]: struct.HandleManager.html
     pub fn destroy(&mut self, handle: Handle) -> bool {
-        if let Some(index) = handle.index() {
-            let index = index as usize;
-
-            if index >= self.generations.len() {
+        if let Some(index) = self.is_valid_impl(handle) {
+            if index as usize >= self.generations.len() {
                 false
             } else {
-                *unsafe { self.generations.get_unchecked_mut(index) } += 1;
-                self.free_indices.push_back(index as u32);
+                let generation = unsafe { self.generations.get_unchecked_mut(index as usize) };
+                *generation = generation.wrapping_add(1);
+                self.free_indices.push_back(index);
                 self.num_handles -= 1;
                 true
             }
@@ -121,6 +110,22 @@ impl HandleManager {
         self.generations.clear();
         self.free_indices.clear();
     }
+
+    pub(crate) fn is_valid_impl(&self, handle: Handle) -> Option<u32> {
+        if let Some((index, generation, _)) = handle.unwrap() {
+            if index as usize >= self.generations.len() {
+                None
+            } else {
+                if *unsafe { self.generations.get_unchecked(index as usize) } == generation {
+                    Some(index)
+                } else {
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -130,81 +135,97 @@ mod tests {
     #[test]
     fn handle_manager() {
         let mut hm = HandleManager::new(0);
-
         assert_eq!(hm.len(), 0);
 
         let handle_0 = hm.create(7);
 
-        assert_eq!(hm.len(), 1);
-
         assert!(hm.is_valid(handle_0));
+        assert_eq!(hm.len(), 1);
 
         assert_eq!(handle_0.index().unwrap(), 0);
         assert_eq!(handle_0.generation().unwrap(), 0);
         assert_eq!(handle_0.metadata().unwrap(), 7);
+        assert_eq!(handle_0.unwrap(), Some((0, 0, 7)));
 
         let handle_1 = hm.create(9);
 
-        assert_eq!(hm.len(), 2);
-
+        assert!(hm.is_valid(handle_0));
         assert!(hm.is_valid(handle_1));
+        assert_eq!(hm.len(), 2);
 
         assert_eq!(handle_1.index().unwrap(), 1);
         assert_eq!(handle_1.generation().unwrap(), 0);
         assert_eq!(handle_1.metadata().unwrap(), 9);
+        assert_eq!(handle_1.unwrap(), Some((1, 0, 9)));
 
         assert!(hm.destroy(handle_0));
 
-        assert_eq!(hm.len(), 1);
+        assert!(!hm.destroy(handle_0));
 
         assert!(!hm.is_valid(handle_0));
         assert!(hm.is_valid(handle_1));
+        assert_eq!(hm.len(), 1);
 
         let handle_2 = hm.create(21);
 
-        assert_eq!(hm.len(), 2);
-
+        assert!(!hm.is_valid(handle_0));
+        assert!(hm.is_valid(handle_1));
         assert!(hm.is_valid(handle_2));
+        assert_eq!(hm.len(), 2);
 
         assert_eq!(handle_2.index().unwrap(), 0);
         assert_eq!(handle_2.generation().unwrap(), 1);
         assert_eq!(handle_2.metadata().unwrap(), 21);
+        assert_eq!(handle_2.unwrap(), Some((0, 1, 21)));
 
         assert!(hm.destroy(handle_1));
 
-        assert_eq!(hm.len(), 1);
+        assert!(!hm.destroy(handle_0));
+        assert!(!hm.destroy(handle_1));
 
         assert!(!hm.is_valid(handle_0));
         assert!(!hm.is_valid(handle_1));
         assert!(hm.is_valid(handle_2));
+        assert_eq!(hm.len(), 1);
 
         let handle_3 = hm.create(42);
 
         assert_eq!(hm.len(), 2);
 
+        assert!(!hm.is_valid(handle_0));
+        assert!(!hm.is_valid(handle_1));
+        assert!(hm.is_valid(handle_2));
         assert!(hm.is_valid(handle_3));
 
         assert_eq!(handle_3.index().unwrap(), 1);
         assert_eq!(handle_3.generation().unwrap(), 1);
         assert_eq!(handle_3.metadata().unwrap(), 42);
+        assert_eq!(handle_3.unwrap(), Some((1, 1, 42)));
 
         assert!(hm.destroy(handle_2));
 
-        assert_eq!(hm.len(), 1);
+        assert!(!hm.destroy(handle_0));
+        assert!(!hm.destroy(handle_1));
+        assert!(!hm.destroy(handle_2));
 
         assert!(!hm.is_valid(handle_0));
         assert!(!hm.is_valid(handle_1));
         assert!(!hm.is_valid(handle_2));
         assert!(hm.is_valid(handle_3));
+        assert_eq!(hm.len(), 1);
 
         assert!(hm.destroy(handle_3));
 
-        assert_eq!(hm.len(), 0);
+        assert!(!hm.destroy(handle_0));
+        assert!(!hm.destroy(handle_1));
+        assert!(!hm.destroy(handle_2));
+        assert!(!hm.destroy(handle_3));
 
         assert!(!hm.is_valid(handle_0));
         assert!(!hm.is_valid(handle_1));
         assert!(!hm.is_valid(handle_2));
         assert!(!hm.is_valid(handle_3));
+        assert_eq!(hm.len(), 0);
     }
 
     #[test]
@@ -227,17 +248,29 @@ mod tests {
         assert!(hm.destroy(handle_3));
         assert!(hm.destroy(handle_4));
 
+        assert!(!hm.is_valid(handle_0));
+        assert!(!hm.is_valid(handle_1));
+        assert!(!hm.is_valid(handle_2));
+        assert!(!hm.is_valid(handle_3));
+        assert!(!hm.is_valid(handle_4));
+
         assert_eq!(hm.len(), 0);
 
         let handle_5 = hm.create(0);
 
         assert_eq!(hm.len(), 1);
 
+        assert!(!hm.is_valid(handle_0));
+        assert!(!hm.is_valid(handle_1));
+        assert!(!hm.is_valid(handle_2));
+        assert!(!hm.is_valid(handle_3));
+        assert!(!hm.is_valid(handle_4));
         assert!(hm.is_valid(handle_5));
 
         assert_eq!(handle_5.index().unwrap(), 0); // <- index `0` reused.
         assert_eq!(handle_5.generation().unwrap(), 1);
         assert_eq!(handle_5.metadata().unwrap(), 0);
+        assert_eq!(handle_5.unwrap(), Some((0, 1, 0)));
 
         assert!(hm.destroy(handle_5));
 

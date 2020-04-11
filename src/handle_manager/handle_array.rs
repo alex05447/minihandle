@@ -83,15 +83,7 @@ impl<T> HandleArray<T> {
     /// [`insert`]: #method.insert
     /// [`removed`]: #method.remove
     pub fn is_valid(&self, handle: Handle) -> bool {
-        if let Some(metadata) = handle.metadata() {
-            if metadata != self.metadata {
-                return false;
-            }
-        } else {
-            return false;
-        }
-
-        self.handle_manager.is_valid(handle)
+        self.is_valid_impl(handle).is_some()
     }
 
     /// If the [`Handle`] [`is_valid`], returns the reference to the `value` which was [`inserted`]
@@ -102,16 +94,15 @@ impl<T> HandleArray<T> {
     /// [`is_valid`]: #method.is_valid
     /// [`inserted`]: #method.insert
     pub fn get(&self, handle: Handle) -> Option<&T> {
-        if !self.is_valid(handle) {
-            None
-        } else {
-            let index = handle.index().expect("Invalid handle.") as usize;
-
-            debug_assert!(index < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index) };
+        if let Some(index) = self.is_valid_impl(handle) {
+            debug_assert!((index as usize) < self.indices.len());
+            let object_index = *unsafe { self.indices.get_unchecked(index as usize) };
 
             debug_assert!((object_index as usize) < self.array.len());
             Some(unsafe { self.array.get_unchecked(object_index as usize) })
+
+        } else {
+            None
         }
     }
 
@@ -123,16 +114,15 @@ impl<T> HandleArray<T> {
     /// [`is_valid`]: #method.is_valid
     /// [`inserted`]: #method.insert
     pub fn get_mut(&mut self, handle: Handle) -> Option<&mut T> {
-        if !self.is_valid(handle) {
-            None
-        } else {
-            let index = handle.index().expect("Invalid handle.") as usize;
-
-            debug_assert!(index < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index) };
+        if let Some(index) = self.is_valid_impl(handle) {
+            debug_assert!((index as usize) < self.indices.len());
+            let object_index = *unsafe { self.indices.get_unchecked(index as usize) };
 
             debug_assert!((object_index as usize) < self.array.len());
             Some(unsafe { self.array.get_unchecked_mut(object_index as usize) })
+
+        } else {
+            None
         }
     }
 
@@ -144,20 +134,16 @@ impl<T> HandleArray<T> {
     /// [`is_valid`]: #method.is_valid
     /// [`inserted`]: #method.insert
     pub fn remove(&mut self, handle: Handle) -> Option<T> {
-        if !self.is_valid(handle) {
-            None
-        } else {
-            let index = handle.index().expect("Invalid handle.") as usize;
-
-            debug_assert!(index < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index) };
+        if let Some(index) = self.is_valid_impl(handle) {
+            debug_assert!((index as usize) < self.indices.len());
+            let object_index = *unsafe { self.indices.get_unchecked(index as usize) };
 
             debug_assert!((object_index as usize) < self.array.len());
             let destroyed = self.handle_manager.destroy(handle);
             debug_assert!(destroyed);
 
             // Move the last object to the free slot and patch its index in the index array.
-            *unsafe { self.indices.get_unchecked_mut(index) } = std::u32::MAX;
+            *unsafe { self.indices.get_unchecked_mut(index as usize) } = std::u32::MAX;
 
             let last_object_index = (self.array.len() - 1) as u32;
 
@@ -172,6 +158,8 @@ impl<T> HandleArray<T> {
             }
 
             Some(self.array.swap_remove(object_index as usize))
+        } else {
+            None
         }
     }
 
@@ -198,6 +186,18 @@ impl<T> HandleArray<T> {
         self.handle_manager.clear();
         self.indices.clear();
         self.array.clear();
+    }
+
+    fn is_valid_impl(&self, handle: Handle) -> Option<u32> {
+        if let Some(metadata) = handle.metadata() {
+            if metadata != self.metadata {
+                return None;
+            }
+        } else {
+            return None;
+        }
+
+        self.handle_manager.is_valid_impl(handle)
     }
 }
 
@@ -236,19 +236,18 @@ mod tests {
 
         let handle_0 = ha.insert(7);
 
+        assert!(ha.is_valid(handle_0));
         assert_eq!(ha.len(), 1);
 
-        assert!(ha.is_valid(handle_0));
-
-        assert_eq!(*ha.get(handle_0).unwrap(), 7);
+        assert_eq!(ha.get(handle_0), Some(&7));
 
         let handle_1 = ha.insert(9);
 
+        assert!(ha.is_valid(handle_0));
+        assert!(ha.is_valid(handle_1));
         assert_eq!(ha.len(), 2);
 
-        assert!(ha.is_valid(handle_1));
-
-        assert_eq!(*ha.get(handle_1).unwrap(), 9);
+        assert_eq!(ha.get(handle_1), Some(&9));
 
         for val in ha.iter() {
             assert!(*val == 7 || *val == 9)
@@ -269,19 +268,17 @@ mod tests {
         }
 
         let removed_0 = ha.remove(handle_0);
-
-        assert_eq!(removed_0.unwrap(), 8);
-
-        assert_eq!(ha.len(), 1);
+        assert_eq!(removed_0, Some(8));
 
         assert!(!ha.is_valid(handle_0));
+        assert!(ha.is_valid(handle_1));
+        assert_eq!(ha.len(), 1);
 
         let removed_1 = ha.remove(handle_1);
+        assert_eq!(removed_1, Some(43));
 
-        assert_eq!(removed_1.unwrap(), 43);
-
-        assert_eq!(ha.len(), 0);
-
+        assert!(!ha.is_valid(handle_0));
         assert!(!ha.is_valid(handle_1));
+        assert_eq!(ha.len(), 0);
     }
 }
