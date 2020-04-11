@@ -100,7 +100,6 @@ impl<T> HandleArray<T> {
 
             debug_assert!((object_index as usize) < self.array.len());
             Some(unsafe { self.array.get_unchecked(object_index as usize) })
-
         } else {
             None
         }
@@ -120,7 +119,6 @@ impl<T> HandleArray<T> {
 
             debug_assert!((object_index as usize) < self.array.len());
             Some(unsafe { self.array.get_unchecked_mut(object_index as usize) })
-
         } else {
             None
         }

@@ -125,35 +125,34 @@ impl Handle {
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn index(&self) -> Option<u32> {
-        self.0
-            .map(Self::index_impl)
+        self.0.map(Self::index_impl)
     }
 
     /// Extracts the [`Handle`]'s generation part, or `None` if the handle is not valid.
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn generation(&self) -> Option<u16> {
-        self.0
-            .map(Self::generation_impl)
+        self.0.map(Self::generation_impl)
     }
 
     /// Extracts the [`Handle`]'s metadata part, or `None` if the handle is not valid.
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn metadata(&self) -> Option<u16> {
-        self.0
-            .map(Self::metadata_impl)
+        self.0.map(Self::metadata_impl)
     }
 
     /// Extracts the [`Handle`]'s index, generation and metadata parts, in that order, or `None` if the handle is not valid.
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn unwrap(&self) -> Option<(u32, u16, u16)> {
-        self.0.map(|h| (
-            Self::index_impl(h),
-            Self::generation_impl(h),
-            Self::metadata_impl(h),
-        ))
+        self.0.map(|h| {
+            (
+                Self::index_impl(h),
+                Self::generation_impl(h),
+                Self::metadata_impl(h),
+            )
+        })
     }
 
     fn index_impl(h: NonZeroU64) -> u32 {
