@@ -12,7 +12,7 @@ pub struct IndexManager<I>
 where
     I: PrimInt + Unsigned,
 {
-    num_indices: u32,
+    num_indices: I,
     next_index: I,
     free_indices: Vec<I>,
 }
@@ -26,7 +26,7 @@ where
     /// [`IndexManager`]: struct.IndexManager.html
     pub fn new() -> Self {
         Self {
-            num_indices: 0,
+            num_indices: I::zero(),
             next_index: I::zero(),
             free_indices: Vec::new(),
         }
@@ -38,8 +38,8 @@ where
     ///
     /// Panics if enough indices are allocated to overflow the underlying index type.
     pub fn create(&mut self) -> I {
-        let index = if self.free_indices.len() > 0 {
-            self.free_indices.pop().unwrap()
+        let index = if let Some(index) = self.free_indices.pop() {
+            index
         } else {
             let index = self.next_index;
             self.next_index = self
@@ -49,7 +49,10 @@ where
             index
         };
 
-        self.num_indices = self.num_indices.checked_add(1).expect("Index overflow.");
+        self.num_indices = self
+            .num_indices
+            .checked_add(&I::one())
+            .expect("Index overflow.");
 
         index
     }
@@ -61,16 +64,15 @@ where
     /// a reallocated index will be considered valid.
     ///
     /// [`created`]: #method.create
-    /// [`Handle`]: struct.Handle.html
-    /// [`destroyed`]: #method.destroy
     /// [`IndexManager`]: struct.IndexManager.html
+    /// [`destroyed`]: #method.destroy
     /// [`HandleManager`]: struct.HandleManager.html
     pub fn is_valid(&self, index: I) -> bool {
         (index < self.next_index) && !self.free_indices.contains(&index)
     }
 
     /// Destoys the `index`, i.e. makes [`is_valid`] by this [`IndexManager`] return `false` for it.
-    /// Returns `true` if the `handle` was [`valid`] and was destroyed; else return `false`.
+    /// Returns `true` if the `index` was [`valid`] and was destroyed; else return `false`.
     ///
     /// NOTE: unlike [`HandleManager`], this does not protect against the A-B-A problem -
     /// a reallocated index will be considered valid.
@@ -78,14 +80,15 @@ where
     /// [`is_valid`]: #method.is_valid
     /// [`valid`]: #method.is_valid
     /// [`IndexManager`]: struct.IndexManager.html
+    /// [`HandleManager`]: struct.HandleManager.html
     pub fn destroy(&mut self, index: I) -> bool {
         if !self.is_valid(index) {
             false
         } else {
-            debug_assert!(self.num_indices > 0);
-            self.num_indices -= 1;
+            debug_assert!(self.num_indices > I::zero());
+            self.num_indices = self.num_indices - I::one();
 
-            if self.num_indices == 0 {
+            if self.num_indices == I::zero() {
                 self.free_indices.clear();
                 self.next_index = I::zero();
             } else {
@@ -96,12 +99,19 @@ where
         }
     }
 
-    /// Returns the current number of valid [`created`] indices by this [`IndexManager`].
+    /// Returns the current number of valid indices, [`created`] by this [`IndexManager`].
     ///
     /// [`created`]: #method.create
     /// [`IndexManager`]: struct.IndexManager.html
-    pub fn len(&self) -> u32 {
+    pub fn len(&self) -> I {
         self.num_indices
+    }
+
+    /// Returns `true` if [`len`] returns `0`.
+    ///
+    /// [`len`]: #method.len
+    pub fn is_empty(&self) -> bool {
+        self.len() == I::zero()
     }
 
     /// Clears the [`IndexManager`], invalidating the allocated indices
@@ -111,7 +121,7 @@ where
     ///
     /// [`IndexManager`]: struct.IndexManager.html
     pub fn clear(&mut self) {
-        self.num_indices = 0;
+        self.num_indices = I::zero();
         self.next_index = I::zero();
         self.free_indices.clear();
     }
@@ -124,36 +134,78 @@ mod tests {
     #[test]
     fn index_manager() {
         let mut im = IndexManager::<u32>::new();
+        assert_eq!(im.len(), 0);
+        assert!(im.is_empty());
 
         let index_0 = im.create();
         assert_eq!(index_0, 0);
+
         assert!(im.is_valid(index_0));
+        assert_eq!(im.len(), 1);
 
         let index_1 = im.create();
         assert_eq!(index_1, 1);
+
         assert!(im.is_valid(index_0));
         assert!(im.is_valid(index_1));
+        assert_eq!(im.len(), 2);
 
-        im.destroy(index_0);
+        assert!(im.destroy(index_0));
+        assert!(!im.destroy(index_0));
+
         assert!(!im.is_valid(index_0));
         assert!(im.is_valid(index_1));
+        assert_eq!(im.len(), 1);
 
         let index_2 = im.create();
         assert_eq!(index_2, 0);
+
         assert!(im.is_valid(index_0));
         assert!(im.is_valid(index_1));
         assert!(im.is_valid(index_2));
+        assert_eq!(im.len(), 2);
 
-        im.destroy(index_1);
+        assert!(im.destroy(index_1));
+        assert!(!im.destroy(index_1));
+
         assert!(im.is_valid(index_0));
         assert!(!im.is_valid(index_1));
         assert!(im.is_valid(index_2));
+        assert_eq!(im.len(), 1);
 
         let index_3 = im.create();
         assert_eq!(index_3, 1);
+
         assert!(im.is_valid(index_0));
         assert!(im.is_valid(index_1));
         assert!(im.is_valid(index_2));
         assert!(im.is_valid(index_3));
+        assert_eq!(im.len(), 2);
+    }
+
+    #[test]
+    fn clear() {
+        let mut im = IndexManager::<u32>::new();
+        assert_eq!(im.len(), 0);
+        assert!(im.is_empty());
+
+        let index_0 = im.create();
+        assert_eq!(index_0, 0);
+
+        assert!(im.is_valid(index_0));
+        assert_eq!(im.len(), 1);
+
+        im.clear();
+
+        assert!(!im.is_valid(index_0));
+        assert_eq!(im.len(), 0);
+        assert!(im.is_empty());
+
+        let index_1 = im.create();
+        assert_eq!(index_1, 0); // <- index reused
+
+        assert!(im.is_valid(index_0)); // <- valid again
+        assert!(im.is_valid(index_1));
+        assert_eq!(im.len(), 1);
     }
 }

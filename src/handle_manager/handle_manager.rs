@@ -1,15 +1,15 @@
 use std::collections::VecDeque;
 
-use super::handle::Handle;
+use crate::{Generation, Handle, Index, Metadata, MAX_HANDLES};
 
 /// Creates, validates and destroys [`Handle`]'s, a.k.a. weak references, a.k.a. generational indices.
 ///
 /// [`Handle`]: struct.Handle.html
 pub struct HandleManager {
-    min_num_free_indices: u32,
-    num_handles: u32,
-    generations: Vec<u16>,
-    free_indices: VecDeque<u32>,
+    min_num_free_indices: Index,
+    num_handles: Index,
+    generations: Vec<Generation>,
+    free_indices: VecDeque<Index>,
 }
 
 impl HandleManager {
@@ -20,9 +20,9 @@ impl HandleManager {
     ///
     /// [`Handle`]: struct.Handle.html
     /// [`HandleManager`]: struct.HandleManager.html
-    pub fn new(min_num_free_indices: u32) -> Self {
+    pub fn new(min_num_free_indices: Index) -> Self {
         Self {
-            min_num_free_indices,
+            min_num_free_indices: min_num_free_indices.min(MAX_HANDLES),
             num_handles: 0,
             generations: Vec::new(),
             free_indices: VecDeque::new(),
@@ -31,22 +31,29 @@ impl HandleManager {
 
     /// Creates a new unique [`Handle`] with associated `metadata`.
     ///
+    /// NOTE: the [`HandleManager`] does not keep track of the [`metadata`] of created handles,
+    /// so it cannot disambiguate between the handles with the same [`index`] and [`generation`] parts, but different [`metadata`].
+    ///
     /// # Panics
     ///
-    /// Panics if more than `std::u32::MAX` handles are allocated.
+    /// Panics if this would allocate more than [`MAX_HANDLES`] handles.
     ///
     /// [`Handle`]: struct.Handle.html
-    pub fn create(&mut self, metadata: u16) -> Handle {
-        let index = if self.free_indices.len() as u32 > self.min_num_free_indices {
+    /// [`MAX_HANDLES`]: constant.MAX_HANDLES.html
+    /// [`metadata`]: struct.Handle.html#method.metadata
+    /// [`index`]: struct.Handle.html#method.index
+    /// [`generation`]: struct.Handle.html#method.generation
+    pub fn create(&mut self, metadata: Metadata) -> Handle {
+        let index = if self.free_indices.len() > self.min_num_free_indices as usize {
             self.free_indices.pop_front().unwrap()
         } else {
             assert!(
-                self.generations.len() < std::u32::MAX as usize,
-                "More than u32::MAX handles allocated."
+                self.generations.len() < MAX_HANDLES as usize,
+                "Attempted to allocate more than MAX_HANDLES handles."
             );
 
             self.generations.push(0);
-            (self.generations.len() - 1) as u32
+            (self.generations.len() - 1) as Index
         };
 
         self.num_handles += 1;
@@ -57,23 +64,30 @@ impl HandleManager {
         Handle::new(index, generation, metadata)
     }
 
-    /// Returns `true` if the [`Handle`] is valid - i.e. it was previously [`created`] by this [`HandleManager`]
+    /// Returns `true` if the [`handle`] is valid - i.e. it was previously [`created`] by this [`HandleManager`]
     /// and has not been [`destroyed`] yet.
     ///
+    /// NOTE: the [`HandleManager`] does not keep track of the [`metadata`] of created handles,
+    /// so it cannot disambiguate between the handles with the same [`index`] and [`generation`] parts, but different [`metadata`].
+    ///
+    /// [`handle`]: struct.Handle.html
     /// [`created`]: #method.create
-    /// [`Handle`]: struct.Handle.html
-    /// [`destroyed`]: #method.destroy
     /// [`HandleManager`]: struct.HandleManager.html
+    /// [`destroyed`]: #method.destroy
+    /// [`metadata`]: struct.Handle.html#method.metadata
+    /// [`index`]: struct.Handle.html#method.index
+    /// [`generation`]: struct.Handle.html#method.generation
     pub fn is_valid(&self, handle: Handle) -> bool {
         self.is_valid_impl(handle).is_some()
     }
 
-    /// Destoys the `handle`, i.e. makes [`is_valid`] by this [`HandleManager`] return `false` for it.
-    /// Returns `true` if the `handle` was [`valid`] and was destroyed; else return `false`.
+    /// Destoys the [`handle`], i.e. makes [`is_valid`] by this [`HandleManager`] return `false` for it.
+    /// Returns `true` if the [`handle`] was [`valid`] and was destroyed; else return `false`.
     ///
+    /// [`handle`]: struct.Handle.html
     /// [`is_valid`]: #method.is_valid
-    /// [`valid`]: #method.is_valid
     /// [`HandleManager`]: struct.HandleManager.html
+    /// [`valid`]: #method.is_valid
     pub fn destroy(&mut self, handle: Handle) -> bool {
         if let Some(index) = self.is_valid_impl(handle) {
             if index as usize >= self.generations.len() {
@@ -82,6 +96,7 @@ impl HandleManager {
                 let generation = unsafe { self.generations.get_unchecked_mut(index as usize) };
                 *generation = generation.wrapping_add(1);
                 self.free_indices.push_back(index);
+                debug_assert!(self.num_handles > 0);
                 self.num_handles -= 1;
                 true
             }
@@ -90,13 +105,20 @@ impl HandleManager {
         }
     }
 
-    /// Returns the current number of valid [`created`] [`Handle`]'s by this [`HandleManager`].
+    /// Returns the current number of valid [`handles`], [`created`] by this [`HandleManager`].
     ///
+    /// [`handles`]: struct.Handle.html
     /// [`created`]: #method.create
-    /// [`Handle`]: struct.Handle.html
     /// [`HandleManager`]: struct.HandleManager.html
     pub fn len(&self) -> u32 {
         self.num_handles
+    }
+
+    /// Returns `true` if [`len`] returns `0`.
+    ///
+    /// [`len`]: #method.len
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Clears the [`HandleManager`], invalidating the allocated handles
@@ -111,7 +133,7 @@ impl HandleManager {
         self.free_indices.clear();
     }
 
-    pub(crate) fn is_valid_impl(&self, handle: Handle) -> Option<u32> {
+    pub(crate) fn is_valid_impl(&self, handle: Handle) -> Option<Index> {
         if let Some((index, generation, _)) = handle.unwrap() {
             if index as usize >= self.generations.len() {
                 None
@@ -136,11 +158,13 @@ mod tests {
     fn handle_manager() {
         let mut hm = HandleManager::new(0);
         assert_eq!(hm.len(), 0);
+        assert!(hm.is_empty());
 
         let handle_0 = hm.create(7);
 
         assert!(hm.is_valid(handle_0));
         assert_eq!(hm.len(), 1);
+        assert!(!hm.is_empty());
 
         assert_eq!(handle_0.index().unwrap(), 0);
         assert_eq!(handle_0.generation().unwrap(), 0);
@@ -152,6 +176,7 @@ mod tests {
         assert!(hm.is_valid(handle_0));
         assert!(hm.is_valid(handle_1));
         assert_eq!(hm.len(), 2);
+        assert!(!hm.is_empty());
 
         assert_eq!(handle_1.index().unwrap(), 1);
         assert_eq!(handle_1.generation().unwrap(), 0);
@@ -159,12 +184,12 @@ mod tests {
         assert_eq!(handle_1.unwrap(), Some((1, 0, 9)));
 
         assert!(hm.destroy(handle_0));
-
         assert!(!hm.destroy(handle_0));
 
         assert!(!hm.is_valid(handle_0));
         assert!(hm.is_valid(handle_1));
         assert_eq!(hm.len(), 1);
+        assert!(!hm.is_empty());
 
         let handle_2 = hm.create(21);
 
@@ -172,6 +197,7 @@ mod tests {
         assert!(hm.is_valid(handle_1));
         assert!(hm.is_valid(handle_2));
         assert_eq!(hm.len(), 2);
+        assert!(!hm.is_empty());
 
         assert_eq!(handle_2.index().unwrap(), 0);
         assert_eq!(handle_2.generation().unwrap(), 1);
@@ -187,6 +213,7 @@ mod tests {
         assert!(!hm.is_valid(handle_1));
         assert!(hm.is_valid(handle_2));
         assert_eq!(hm.len(), 1);
+        assert!(!hm.is_empty());
 
         let handle_3 = hm.create(42);
 
@@ -213,6 +240,7 @@ mod tests {
         assert!(!hm.is_valid(handle_2));
         assert!(hm.is_valid(handle_3));
         assert_eq!(hm.len(), 1);
+        assert!(!hm.is_empty());
 
         assert!(hm.destroy(handle_3));
 
@@ -226,13 +254,14 @@ mod tests {
         assert!(!hm.is_valid(handle_2));
         assert!(!hm.is_valid(handle_3));
         assert_eq!(hm.len(), 0);
+        assert!(hm.is_empty());
     }
 
     #[test]
     fn handle_manager_with_free_index_queue() {
         let mut hm = HandleManager::new(4);
-
         assert_eq!(hm.len(), 0);
+        assert!(hm.is_empty());
 
         let handle_0 = hm.create(0);
         let handle_1 = hm.create(0);
@@ -241,6 +270,7 @@ mod tests {
         let handle_4 = hm.create(0);
 
         assert_eq!(hm.len(), 5);
+        assert!(!hm.is_empty());
 
         assert!(hm.destroy(handle_0));
         assert!(hm.destroy(handle_1));
@@ -255,10 +285,12 @@ mod tests {
         assert!(!hm.is_valid(handle_4));
 
         assert_eq!(hm.len(), 0);
+        assert!(hm.is_empty());
 
         let handle_5 = hm.create(0);
 
         assert_eq!(hm.len(), 1);
+        assert!(!hm.is_empty());
 
         assert!(!hm.is_valid(handle_0));
         assert!(!hm.is_valid(handle_1));
@@ -273,8 +305,10 @@ mod tests {
         assert_eq!(handle_5.unwrap(), Some((0, 1, 0)));
 
         assert!(hm.destroy(handle_5));
+        assert!(!hm.destroy(handle_5));
 
         assert_eq!(hm.len(), 0);
+        assert!(hm.is_empty());
 
         assert!(!hm.is_valid(handle_0));
         assert!(!hm.is_valid(handle_1));
@@ -282,5 +316,29 @@ mod tests {
         assert!(!hm.is_valid(handle_3));
         assert!(!hm.is_valid(handle_4));
         assert!(!hm.is_valid(handle_5));
+    }
+
+    #[test]
+    fn clear() {
+        let mut hm = HandleManager::new(0);
+        assert_eq!(hm.len(), 0);
+        assert!(hm.is_empty());
+
+        let handle_0 = hm.create(0);
+
+        assert!(hm.is_valid(handle_0));
+        assert_eq!(hm.len(), 1);
+
+        hm.clear();
+
+        assert!(!hm.is_valid(handle_0));
+        assert_eq!(hm.len(), 0);
+        assert!(hm.is_empty());
+
+        let handle_1 = hm.create(0);
+
+        assert!(hm.is_valid(handle_0)); // <- valid again
+        assert!(hm.is_valid(handle_1));
+        assert_eq!(hm.len(), 1);
     }
 }
