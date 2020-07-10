@@ -1,27 +1,29 @@
 use num_traits::{PrimInt, Unsigned};
 
-/// Like [`HandleManager`], but uses a simple index instead of a
+/// Trait for the index type used by the [`IndexManager`] - a primitive unsigned integer.
+///
+/// [`IndexManager`]: struct.IndexManager.html
+pub trait Index : PrimInt + Unsigned {}
+
+impl<T: PrimInt + Unsigned> Index for T {}
+
+/// Like [`HandleManager`], but uses a simple [`index`] instead of a
 /// generational handle.
 ///
 /// Intended for use cases where the user has full control over index lifetime
 /// and requires just a simple unique index allocator the `IndexManager` provides.
 ///
 /// [`HandleManager`]: struct.HandleManager.html
+/// [`index`]: trait.Index.html
 #[derive(Clone)]
-pub struct IndexManager<I>
-where
-    I: PrimInt + Unsigned,
-{
+pub struct IndexManager<I: Index> {
     num_indices: I,
     next_index: I,
     free_indices: Vec<I>,
 }
 
-impl<I> IndexManager<I>
-where
-    I: PrimInt + Unsigned,
-{
-    /// Creates a new `IndexManager`.
+impl<I: Index> IndexManager<I> {
+    /// Creates a new [`IndexManager`].
     ///
     /// [`IndexManager`]: struct.IndexManager.html
     pub fn new() -> Self {
@@ -32,11 +34,14 @@ where
         }
     }
 
-    /// Creates a new index.
+    /// Allocates a new [`index`], unique for this [`IndexManager`].
     ///
     /// # Panics
     ///
-    /// Panics if enough indices are allocated to overflow the underlying index type.
+    /// Panics if enough indices are allocated to overflow the underlying [`index`].
+    ///
+    /// [`IndexManager`]: struct.IndexManager.html
+    /// [`index`]: trait.Index.html
     pub fn create(&mut self) -> I {
         let index = if let Some(index) = self.free_indices.pop() {
             index
@@ -45,24 +50,25 @@ where
             self.next_index = self
                 .next_index
                 .checked_add(&I::one())
-                .expect("Index overflow.");
+                .expect("index overflow");
             index
         };
 
         self.num_indices = self
             .num_indices
             .checked_add(&I::one())
-            .expect("Index overflow.");
+            .expect("index overflow");
 
         index
     }
 
-    /// Returns `true` if the `index` is valid - i.e. it was previously [`created`] by this [`IndexManager`]
+    /// Returns `true` if the [`index`] is valid - i.e. it was previously [`created`] by this [`IndexManager`]
     /// and has not been [`destroyed`] yet.
     ///
     /// NOTE: unlike [`HandleManager`], this does not protect against the A-B-A problem -
-    /// a reallocated index will be considered valid.
+    /// a reallocated [`index`] will be considered valid.
     ///
+    /// [`index`]: trait.Index.html
     /// [`created`]: #method.create
     /// [`IndexManager`]: struct.IndexManager.html
     /// [`destroyed`]: #method.destroy
@@ -71,15 +77,16 @@ where
         (index < self.next_index) && !self.free_indices.contains(&index)
     }
 
-    /// Destoys the `index`, i.e. makes [`is_valid`] by this [`IndexManager`] return `false` for it.
-    /// Returns `true` if the `index` was [`valid`] and was destroyed; else return `false`.
+    /// Destoys the [`index`], i.e. makes [`is_valid`] by this [`IndexManager`] return `false` for it.
+    /// Returns `true` if the [`index`] was [`valid`] and was destroyed; else return `false`.
     ///
     /// NOTE: unlike [`HandleManager`], this does not protect against the A-B-A problem -
-    /// a reallocated index will be considered valid.
+    /// a reallocated [`index`] will be considered valid.
     ///
+    /// [`index`]: trait.Index.html
     /// [`is_valid`]: #method.is_valid
-    /// [`valid`]: #method.is_valid
     /// [`IndexManager`]: struct.IndexManager.html
+    /// [`valid`]: #method.is_valid
     /// [`HandleManager`]: struct.HandleManager.html
     pub fn destroy(&mut self, index: I) -> bool {
         if !self.is_valid(index) {
@@ -99,8 +106,9 @@ where
         }
     }
 
-    /// Returns the current number of valid indices, [`created`] by this [`IndexManager`].
+    /// Returns the current number of [`valid`] indices, [`created`] by this [`IndexManager`].
     ///
+    /// [`valid`]: #method.is_valid
     /// [`created`]: #method.create
     /// [`IndexManager`]: struct.IndexManager.html
     pub fn len(&self) -> I {

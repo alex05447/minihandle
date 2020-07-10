@@ -1,17 +1,18 @@
-use num_traits::{FromPrimitive, PrimInt, Unsigned};
+use num_traits::{FromPrimitive};
 
-use crate::IndexManager;
+use crate::{IndexManager, Index};
 
-/// Like [`HandleArray`], but uses a simple index instead of a
+/// Like [`HandleArray`], but uses a simple [`index`] instead of a
 /// generational handle.
 ///
 /// Intended for use cases where the user has full control over index lifetime
 /// and requires just a simple array index indirection the `IndexArray` provides.
 ///
 /// [`HandleArray`]: struct.HandleArray.html
+/// [`index`]: trait.Index.html
 pub struct IndexArray<T, I>
 where
-    I: PrimInt + Unsigned + FromPrimitive,
+    I: Index + FromPrimitive,
 {
     /// Manages the indices returned by this index array, corresponding to indices in the `indices` indirection array.
     index_manager: IndexManager<I>,
@@ -23,7 +24,7 @@ where
 
 impl<T, I> IndexArray<T, I>
 where
-    I: PrimInt + Unsigned + FromPrimitive,
+    I: Index + FromPrimitive,
 {
     /// Creates a new [`IndexArray`].
     ///
@@ -36,13 +37,14 @@ where
         }
     }
 
-    /// Inserts the `value` in the array, returning the index which may be used to
+    /// Inserts the `value` in the array, returning the [`index`] which may be used to
     /// [`get`] / [`get_mut`] / [`remove`] it later.
     ///
     /// # Panics
     ///
-    /// Panics if this would insert enough objects to overflow the underlying index type.
+    /// Panics if this would insert enough objects to overflow the underlying [`index`] type.
     ///
+    /// [`index`]: trait.Index.html
     /// [`get`]: #method.get
     /// [`get_mut`]: #method.get_mut
     /// [`remove`]: #method.remove
@@ -62,14 +64,15 @@ where
         index
     }
 
-    /// Inserts the `value` in the array, returning the index which may be used to
+    /// Inserts the `value` in the array, returning the [`index`] which may be used to
     /// [`get`] / [`get_mut`] / [`remove`] it later,
     /// and the mutable reference to the inserted `value`.
     ///
     /// # Panics
     ///
-    /// Panics if this would insert enough objects to overflow the underlying index type.
+    /// Panics if this would insert enough objects to overflow the underlying [`index`] type.
     ///
+    /// [`index`]: trait.Index.html
     /// [`get`]: #method.get
     /// [`get_mut`]: #method.get_mut
     /// [`remove`]: #method.remove
@@ -79,12 +82,13 @@ where
         (index, self.array.last_mut().unwrap())
     }
 
-    /// Returns `true` if the `index` is valid - i.e. it was previously returned by [`insert`] / [`insert_entry`] by this [`IndexArray`]
+    /// Returns `true` if the [`index`] is valid - i.e. it was previously returned by [`insert`] / [`insert_entry`] by this [`IndexArray`]
     /// and has not been [`removed`] yet.
     ///
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
-    /// a reallocated index will be considered valid.
+    /// a reallocated [`index`] will be considered valid.
     ///
+    /// [`index`]: trait.Index.html
     /// [`insert`]: #method.insert
     /// [`insert_entry`]: #method.insert_entry
     /// [`IndexArray`]: struct.IndexArray.html
@@ -94,13 +98,14 @@ where
         self.index_manager.is_valid(index)
     }
 
-    /// If the `index` [`is_valid`], returns the reference to the `value` which was [`inserted`]
+    /// If the [`index`] [`is_valid`], returns the reference to the `value` which was [`inserted`]
     /// when this handle was returned by this [`IndexArray`].
     /// Else returns `None`.
     ///
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
-    /// a reallocated index will be considered valid.
+    /// a reallocated [`index`] will be considered valid.
     ///
+    /// [`index`]: trait.Index.html
     /// [`is_valid`]: #method.is_valid
     /// [`inserted`]: #method.insert
     /// [`IndexArray`]: struct.IndexArray.html
@@ -121,13 +126,14 @@ where
         }
     }
 
-    /// If the `index` [`is_valid`], returns the reference to the `value` which was [`inserted`]
+    /// If the [`index`] [`is_valid`], returns the reference to the `value` which was [`inserted`]
     /// when this handle was returned by this [`IndexArray`].
     /// Else returns `None`.
     ///
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
-    /// a reallocated index will be considered valid.
+    /// a reallocated [`index`] will be considered valid.
     ///
+    /// [`index`]: trait.Index.html
     /// [`is_valid`]: #method.is_valid
     /// [`inserted`]: #method.insert
     /// [`IndexArray`]: struct.IndexArray.html
@@ -148,13 +154,14 @@ where
         }
     }
 
-    /// If the `index` [`is_valid`], removes and returns the `value` which was [`inserted`]
-    /// when this handle was returned by this [`IndexArray`], and invalidates the `index`.
+    /// If the [`index`] [`is_valid`], removes and returns the `value` which was [`inserted`]
+    /// when this handle was returned by this [`IndexArray`], and invalidates the [`index`].
     /// Else returns `None`.
     ///
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
-    /// a reallocated index will be considered valid.
+    /// a reallocated [`index`] will be considered valid.
     ///
+    /// [`index`]: trait.Index.html
     /// [`handle`]: struct.Handle.html
     /// [`is_valid`]: #method.is_valid
     /// [`inserted`]: #method.insert
@@ -224,7 +231,7 @@ where
 
 impl<T, I> std::ops::Deref for IndexArray<T, I>
 where
-    I: PrimInt + Unsigned + FromPrimitive,
+    I: Index + FromPrimitive,
 {
     type Target = [T];
 
@@ -235,7 +242,7 @@ where
 
 impl<T, I> std::ops::DerefMut for IndexArray<T, I>
 where
-    I: PrimInt + Unsigned + FromPrimitive,
+    I: Index + FromPrimitive,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.array.deref_mut()
@@ -244,7 +251,7 @@ where
 
 impl<T, I> std::iter::IntoIterator for IndexArray<T, I>
 where
-    I: PrimInt + Unsigned + FromPrimitive,
+    I: Index + FromPrimitive,
 {
     type Item = T;
     type IntoIter = std::vec::IntoIter<Self::Item>;

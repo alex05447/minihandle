@@ -1,15 +1,15 @@
 use std::collections::VecDeque;
 
-use crate::{Generation, Handle, Index, Metadata, MAX_HANDLES};
+use crate::{HandleGeneration, Handle, HandleIndex, HandleMetadata, MAX_HANDLES};
 
 /// Creates, validates and destroys [`Handle`]'s, a.k.a. weak references, a.k.a. generational indices.
 ///
 /// [`Handle`]: struct.Handle.html
 pub struct HandleManager {
-    min_num_free_indices: Index,
-    num_handles: Index,
-    generations: Vec<Generation>,
-    free_indices: VecDeque<Index>,
+    min_num_free_indices: HandleIndex,
+    num_handles: HandleIndex,
+    generations: Vec<HandleGeneration>,
+    free_indices: VecDeque<HandleIndex>,
 }
 
 impl HandleManager {
@@ -20,7 +20,7 @@ impl HandleManager {
     ///
     /// [`Handle`]: struct.Handle.html
     /// [`HandleManager`]: struct.HandleManager.html
-    pub fn new(min_num_free_indices: Index) -> Self {
+    pub fn new(min_num_free_indices: HandleIndex) -> Self {
         Self {
             min_num_free_indices: min_num_free_indices.min(MAX_HANDLES),
             num_handles: 0,
@@ -43,7 +43,7 @@ impl HandleManager {
     /// [`metadata`]: struct.Handle.html#method.metadata
     /// [`index`]: struct.Handle.html#method.index
     /// [`generation`]: struct.Handle.html#method.generation
-    pub fn create(&mut self, metadata: Metadata) -> Handle {
+    pub fn create(&mut self, metadata: HandleMetadata) -> Handle {
         let index = if self.free_indices.len() > self.min_num_free_indices as usize {
             self.free_indices.pop_front().unwrap()
         } else {
@@ -53,7 +53,7 @@ impl HandleManager {
             );
 
             self.generations.push(0);
-            (self.generations.len() - 1) as Index
+            (self.generations.len() - 1) as HandleIndex
         };
 
         self.num_handles += 1;
@@ -133,7 +133,7 @@ impl HandleManager {
         self.free_indices.clear();
     }
 
-    pub(crate) fn is_valid_impl(&self, handle: Handle) -> Option<Index> {
+    pub(crate) fn is_valid_impl(&self, handle: Handle) -> Option<HandleIndex> {
         if let Some((index, generation, _)) = handle.unwrap() {
             if index as usize >= self.generations.len() {
                 None

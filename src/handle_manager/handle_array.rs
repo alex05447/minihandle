@@ -1,4 +1,4 @@
-use crate::{Handle, HandleManager, Index, Metadata};
+use crate::{Handle, HandleManager, HandleIndex, HandleMetadata};
 
 /// Associates a single `T` value with a [`Handle`].
 ///
@@ -8,18 +8,18 @@ use crate::{Handle, HandleManager, Index, Metadata};
 /// [`Handle`]: struct.Handle.html
 pub struct HandleArray<T> {
     /// All handles returned by this handle array share this metadata value.
-    metadata: Metadata,
+    metadata: HandleMetadata,
     /// Manages the handles returned by this handle array, corresponding to indices in the `indices` indirection array.
     handle_manager: HandleManager,
     /// Maps the handle's index to the object's actual index in the `array`;
     /// thus may contain holes filled with `INVALID_INDEX`.
-    indices: Vec<Index>,
+    indices: Vec<HandleIndex>,
     /// Actual dense object storage.
     array: Vec<T>,
 }
 
 impl<T> HandleArray<T> {
-    const INVALID_INDEX: Index = Index::MAX;
+    const INVALID_INDEX: HandleIndex = HandleIndex::MAX;
 
     /// Creates a new [`HandleArray`].
     ///
@@ -30,7 +30,7 @@ impl<T> HandleArray<T> {
     ///
     /// [`Handle`]: struct.Handle.html
     /// [`HandleArray`]: struct.HandleArray.html
-    pub fn new(metadata: Metadata, min_num_free_indices: Index) -> Self {
+    pub fn new(metadata: HandleMetadata, min_num_free_indices: HandleIndex) -> Self {
         Self {
             metadata,
             handle_manager: HandleManager::new(min_num_free_indices),
@@ -53,14 +53,14 @@ impl<T> HandleArray<T> {
     /// [`MAX_HANDLES`]: constant.MAX_HANDLES.html
     pub fn insert(&mut self, value: T) -> Handle {
         let handle = self.handle_manager.create(self.metadata);
-        let index = handle.index().expect("Invalid handle.") as usize;
+        let index = handle.index().expect("invalid handle") as usize;
 
         if index >= self.indices.len() {
             self.indices.resize(index + 1, Self::INVALID_INDEX);
         }
 
         debug_assert!(unsafe { *self.indices.get_unchecked(index) == Self::INVALID_INDEX });
-        *unsafe { self.indices.get_unchecked_mut(index) } = self.array.len() as Index;
+        *unsafe { self.indices.get_unchecked_mut(index) } = self.array.len() as HandleIndex;
         self.array.push(value);
 
         handle
@@ -159,7 +159,7 @@ impl<T> HandleArray<T> {
             *unsafe { self.indices.get_unchecked_mut(index as usize) } = Self::INVALID_INDEX;
 
             debug_assert!(self.array.len() > 0);
-            let last_object_index = (self.array.len() - 1) as Index;
+            let last_object_index = (self.array.len() - 1) as HandleIndex;
 
             if object_index != last_object_index {
                 for index in self.indices.iter_mut() {
@@ -204,7 +204,7 @@ impl<T> HandleArray<T> {
         self.array.clear();
     }
 
-    fn is_valid_impl(&self, handle: Handle) -> Option<Index> {
+    fn is_valid_impl(&self, handle: Handle) -> Option<HandleIndex> {
         if let Some(metadata) = handle.metadata() {
             if metadata != self.metadata {
                 return None;

@@ -7,8 +7,8 @@ mod handle_manager;
 mod index_manager;
 
 pub use handle_manager::{
-    Generation, Handle, HandleArray, HandleManager, Index, Metadata, MAX_HANDLES,
+    HandleGeneration, Handle, HandleArray, HandleManager, HandleIndex, HandleMetadata, MAX_HANDLES,
 };
 
 #[cfg(feature = "index")]
-pub use index_manager::{IndexArray, IndexManager};
+pub use index_manager::{IndexArray, IndexManager, Index};
