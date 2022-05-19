@@ -1,18 +1,24 @@
-use num_traits::{FromPrimitive};
+use {
+    crate::*,
+    std::{
+        iter::IntoIterator,
+        ops::{Deref, DerefMut},
+    },
+};
 
-use crate::{IndexManager, Index};
-
-/// Like [`HandleArray`], but uses a simple [`index`] instead of a
+/// Like [`HandleArray`], but uses a simple [`index`](Index) instead of a
 /// generational handle.
 ///
-/// Intended for use cases where the user has full control over index lifetime
-/// and requires just a simple array index indirection the `IndexArray` provides.
+/// Internally stores `T` objects in a dense array,
+/// remapping the [`index`](Index) to object index through an indirection array.
 ///
-/// [`HandleArray`]: struct.HandleArray.html
-/// [`index`]: trait.Index.html
+/// Derefs to a `[T]` slice.
+///
+/// Intended for use cases where the user has full control over index lifetime
+/// and requires just a simple array index indirection the [`IndexArray`] provides.
 pub struct IndexArray<T, I>
 where
-    I: Index + FromPrimitive,
+    I: Index,
 {
     /// Manages the indices returned by this index array, corresponding to indices in the `indices` indirection array.
     index_manager: IndexManager<I>,
@@ -24,8 +30,11 @@ where
 
 impl<T, I> IndexArray<T, I>
 where
-    I: Index + FromPrimitive,
+    I: Index,
 {
+    // Needs `Bounded::max_value()` to be `const`.
+    //const INVALID_INDEX: I = I::max_value();
+
     /// Creates a new [`IndexArray`].
     ///
     /// [`IndexArray`]: struct.IndexArray.html
@@ -37,181 +46,128 @@ where
         }
     }
 
-    /// Inserts the `value` in the array, returning the [`index`] which may be used to
-    /// [`get`] / [`get_mut`] / [`remove`] it later.
+    /// Inserts the `value` in the array, returning the [`index`](Index) which may be used to
+    /// [`get`](IndexArray::get) / [`get_mut`](IndexArray::get_mut) / [`remove`](IndexArray::remove) it later.
     ///
     /// # Panics
     ///
-    /// Panics if this would insert enough objects to overflow the underlying [`index`] type.
-    ///
-    /// [`index`]: trait.Index.html
-    /// [`get`]: #method.get
-    /// [`get_mut`]: #method.get_mut
-    /// [`remove`]: #method.remove
+    /// Panics if this would insert enough objects to overflow the underlying [`index`](Index) type.
     pub fn insert(&mut self, value: T) -> I {
         let index = self.index_manager.create();
-        let index_usize = index.to_usize().unwrap();
+        let index_usize = index.to_usize().expect("index not convertible to usize");
 
-        if index_usize >= self.indices.len() {
-            self.indices.resize(index_usize + 1, I::max_value());
+        // Needs `Bounded::max_value()` to be `const`.
+        // let invalid_index = Self::INVALID_INDEX;
+        let invalid_index = I::max_value();
+
+        let object_index =
+            I::from_usize(self.array.len()).expect("index not convertible from usize");
+
+        if index_usize == self.indices.len() {
+            debug_assert_eq!(index_usize, self.indices.len());
+            self.indices.push(object_index);
+        } else {
+            debug_assert!(index_usize < self.indices.len());
+            let object_index_ = unsafe { self.indices.get_unchecked_mut(index_usize) };
+            debug_assert!(*object_index_ == invalid_index);
+            *object_index_ = object_index;
         }
 
-        debug_assert!(unsafe { *self.indices.get_unchecked(index_usize) == I::max_value() });
-        *unsafe { self.indices.get_unchecked_mut(index_usize) } =
-            I::from_usize(self.array.len()).unwrap();
         self.array.push(value);
 
         index
     }
 
-    /// Inserts the `value` in the array, returning the [`index`] which may be used to
-    /// [`get`] / [`get_mut`] / [`remove`] it later,
+    /// Inserts the `value` in the array, returning the [`index`](Index) which may be used to
+    /// [`get`](IndexArray::get) / [`get_mut`](IndexArray::get_mut) / [`remove`](IndexArray::remove) it later,
     /// and the mutable reference to the inserted `value`.
     ///
     /// # Panics
     ///
-    /// Panics if this would insert enough objects to overflow the underlying [`index`] type.
-    ///
-    /// [`index`]: trait.Index.html
-    /// [`get`]: #method.get
-    /// [`get_mut`]: #method.get_mut
-    /// [`remove`]: #method.remove
+    /// Panics if this would insert enough objects to overflow the underlying [`index`](Index) type.
     pub fn insert_entry(&mut self, value: T) -> (I, &mut T) {
         let index = self.insert(value);
 
-        (index, self.array.last_mut().unwrap())
+        (index, unsafe { debug_unwrap(self.array.last_mut(), "empty object array") })
     }
 
-    /// Returns `true` if the [`index`] is valid - i.e. it was previously returned by [`insert`] / [`insert_entry`] by this [`IndexArray`]
-    /// and has not been [`removed`] yet.
+    /// Returns `true` if the [`index`](Index) is valid - i.e. it was previously
+    /// returned by [`insert`](IndexArray::insert) / [`insert_entry`](IndexArray::insert_entry)
+    /// by this [`IndexArray`] and has not been [`removed`](IndexArray::remove) yet.
     ///
-    /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
-    /// a reallocated [`index`] will be considered valid.
-    ///
-    /// [`index`]: trait.Index.html
-    /// [`insert`]: #method.insert
-    /// [`insert_entry`]: #method.insert_entry
-    /// [`IndexArray`]: struct.IndexArray.html
-    /// [`removed`]: #method.remove
-    /// [`HandleArray`]: struct.HandleArray.html
+    /// NOTE: unlike [`IndexArray`], this does not protect against the A-B-A problem -
+    /// a reallocated [`index`](Index) will be considered valid.
     pub fn is_valid(&self, index: I) -> bool {
         self.index_manager.is_valid(index)
     }
 
-    /// If the [`index`] [`is_valid`], returns the reference to the `value` which was [`inserted`]
+    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), returns the reference to the `value` which was [`inserted`](IndexArray::inserted)
     /// when this handle was returned by this [`IndexArray`].
     /// Else returns `None`.
     ///
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
-    /// a reallocated [`index`] will be considered valid.
-    ///
-    /// [`index`]: trait.Index.html
-    /// [`is_valid`]: #method.is_valid
-    /// [`inserted`]: #method.insert
-    /// [`IndexArray`]: struct.IndexArray.html
-    /// [`HandleArray`]: struct.HandleArray.html
+    /// a reallocated [`index`](Index) will be considered valid.
     pub fn get(&self, index: I) -> Option<&T> {
-        if self.is_valid(index) {
-            let index_usize = index.to_usize().unwrap();
-
-            debug_assert!(index_usize < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index_usize) };
-
-            let object_index_usize = object_index.to_usize().unwrap();
+        self.is_valid_impl(index).map(|(_, _, object_index_usize)| {
             debug_assert!(object_index_usize < self.array.len());
-
-            Some(unsafe { self.array.get_unchecked(object_index_usize) })
-        } else {
-            None
-        }
+            unsafe { self.array.get_unchecked(object_index_usize) }
+        })
     }
 
-    /// If the [`index`] [`is_valid`], returns the reference to the `value` which was [`inserted`]
+    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), returns the mutable reference to the `value` which was [`inserted`](IndexArray::inserted)
     /// when this handle was returned by this [`IndexArray`].
     /// Else returns `None`.
     ///
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
-    /// a reallocated [`index`] will be considered valid.
-    ///
-    /// [`index`]: trait.Index.html
-    /// [`is_valid`]: #method.is_valid
-    /// [`inserted`]: #method.insert
-    /// [`IndexArray`]: struct.IndexArray.html
-    /// [`HandleArray`]: struct.HandleArray.html
+    /// a reallocated [`index`](Index) will be considered valid.
     pub fn get_mut(&mut self, index: I) -> Option<&mut T> {
-        if self.is_valid(index) {
-            let index_usize = index.to_usize().unwrap();
-
-            debug_assert!(index_usize < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index_usize) };
-
-            let object_index_usize = object_index.to_usize().unwrap();
-
-            debug_assert!(object_index_usize < self.array.len());
-            Some(unsafe { self.array.get_unchecked_mut(object_index_usize) })
-        } else {
-            None
-        }
+        self.is_valid_impl(index)
+            .map(move |(_, _, object_index_usize)| {
+                debug_assert!(object_index_usize < self.array.len());
+                unsafe { self.array.get_unchecked_mut(object_index_usize) }
+            })
     }
 
-    /// If the [`index`] [`is_valid`], removes and returns the `value` which was [`inserted`]
-    /// when this handle was returned by this [`IndexArray`], and invalidates the [`index`].
+    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), removes and returns the `value` which was [`inserted`](IndexArray::inserted)
+    /// when this handle was returned by this [`IndexArray`], and invalidates the [`index`](Index).
     /// Else returns `None`.
     ///
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
-    /// a reallocated [`index`] will be considered valid.
-    ///
-    /// [`index`]: trait.Index.html
-    /// [`handle`]: struct.Handle.html
-    /// [`is_valid`]: #method.is_valid
-    /// [`inserted`]: #method.insert
-    /// [`IndexArray`]: struct.IndexArray.html
+    /// a reallocated [`index`](Index) will be considered valid.
     pub fn remove(&mut self, index: I) -> Option<T> {
-        if self.is_valid(index) {
-            let index_usize = index.to_usize().unwrap();
+        self.is_valid_impl(index)
+            .map(|(index_usize, object_index, object_index_usize)| {
+                debug_assert!(object_index_usize < self.array.len());
 
-            debug_assert!(index_usize < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index_usize) };
+                self.index_manager.destroy_impl(index);
 
-            let object_index_usize = object_index.to_usize().unwrap();
+                // Needs `Bounded::max_value()` to be `const`.
+                // let invalid_index = Self::INVALID_INDEX;
+                let invalid_index = I::max_value();
 
-            debug_assert!(object_index_usize < self.array.len());
+                // Move the last object to the free slot and patch its index in the index array.
+                *unsafe { self.indices.get_unchecked_mut(index_usize) } = invalid_index;
 
-            let destroyed = self.index_manager.destroy(index);
-            debug_assert!(destroyed);
+                debug_assert!(self.array.len() > 0);
+                let last_object_index =
+                    I::from_usize(self.array.len() - 1).expect("index not convertible from usize");
 
-            // Move the last object to the free slot and patch its index in the index array.
-            *unsafe { self.indices.get_unchecked_mut(index_usize) } = I::max_value();
-
-            debug_assert!(self.array.len() > 0);
-            let last_object_index = I::from_usize(self.array.len() - 1).unwrap();
-
-            if object_index != last_object_index {
-                for index in self.indices.iter_mut() {
-                    if *index == last_object_index {
-                        *index = object_index;
-                        break;
-                    }
+                if object_index != last_object_index {
+                    self.indices.iter_mut().find_map(|index| {
+                        (*index == last_object_index).then(|| *index = object_index)
+                    });
                 }
-            }
 
-            Some(self.array.swap_remove(object_index_usize))
-        } else {
-            None
-        }
+                unsafe { swap_remove(&mut self.array, object_index_usize) }
+            })
     }
 
-    /// Returns the current number of valid indices / values, [`inserted`] in this [`IndexArray`].
-    ///
-    /// [`inserted`]: #method.insert
-    /// [`IndexArray`]: struct.IndexArray.html
+    /// Returns the current number of valid [`indices`](Index) / values, [`inserted`](IndexArray::inserted) in this [`IndexArray`].
     pub fn len(&self) -> usize {
         self.array.len()
     }
 
-    /// Returns `true` if [`len`] returns `0`.
-    ///
-    /// [`len`]: #method.len
+    /// Returns `true` if [`len`](IndexArray::len) returns `0`.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -220,18 +176,34 @@ where
     /// (but only until they are allocated again).
     ///
     /// Has no effect on the allocated capacity of the internal data structures.
-    ///
-    /// [`IndexArray`]: struct.IndexArray.html
     pub fn clear(&mut self) {
         self.index_manager.clear();
         self.indices.clear();
         self.array.clear();
     }
+
+    /// Returns the tuple of (index (as usize), object index, object index (as usize)) for a valid `index`.
+    fn is_valid_impl(&self, index: I) -> Option<(usize, I, usize)> {
+        self.index_manager.is_valid(index).then(|| {
+            let index_usize = index.to_usize().expect("index not convertible to usize");
+
+            debug_assert!(index_usize < self.indices.len());
+            let object_index = *unsafe { self.indices.get_unchecked(index_usize) };
+
+            (
+                index_usize,
+                object_index,
+                object_index
+                    .to_usize()
+                    .expect("index not convertible to usize"),
+            )
+        })
+    }
 }
 
-impl<T, I> std::ops::Deref for IndexArray<T, I>
+impl<T, I> Deref for IndexArray<T, I>
 where
-    I: Index + FromPrimitive,
+    I: Index,
 {
     type Target = [T];
 
@@ -240,18 +212,18 @@ where
     }
 }
 
-impl<T, I> std::ops::DerefMut for IndexArray<T, I>
+impl<T, I> DerefMut for IndexArray<T, I>
 where
-    I: Index + FromPrimitive,
+    I: Index,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.array.deref_mut()
     }
 }
 
-impl<T, I> std::iter::IntoIterator for IndexArray<T, I>
+impl<T, I> IntoIterator for IndexArray<T, I>
 where
-    I: Index + FromPrimitive,
+    I: Index,
 {
     type Item = T;
     type IntoIter = std::vec::IntoIter<Self::Item>;

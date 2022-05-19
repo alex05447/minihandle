@@ -1,11 +1,22 @@
-use crate::{Handle, HandleManager, HandleIndex, HandleMetadata};
+use {
+    crate::*,
+    static_assertions::*,
+    std::{
+        iter::IntoIterator,
+        ops::{Deref, DerefMut},
+    },
+};
+
+type ObjectIndex = HandleIndex;
 
 /// Associates a single `T` value with a [`Handle`].
 ///
 /// Internally stores `T` objects in a dense array,
 /// remapping the [`Handle`]'s index to object index through an indirection array.
 ///
-/// [`Handle`]: struct.Handle.html
+/// Derefs to a `[T]` slice.
+///
+/// Also known as a pool, or a typed arena (TODO: consider renaming?).
 pub struct HandleArray<T> {
     /// All handles returned by this handle array share this metadata value.
     metadata: HandleMetadata,
@@ -13,23 +24,22 @@ pub struct HandleArray<T> {
     handle_manager: HandleManager,
     /// Maps the handle's index to the object's actual index in the `array`;
     /// thus may contain holes filled with `INVALID_INDEX`.
-    indices: Vec<HandleIndex>,
+    indices: Vec<ObjectIndex>,
     /// Actual dense object storage.
     array: Vec<T>,
 }
 
-impl<T> HandleArray<T> {
-    const INVALID_INDEX: HandleIndex = HandleIndex::MAX;
+/// NOTE: this can never be confused with a valid handle index, because [`MAX_HANDLES`] is less than [`INVALID_INDEX`].
+const INVALID_INDEX: HandleIndex = HandleIndex::MAX;
 
+const_assert!(MAX_HANDLES < INVALID_INDEX);
+
+impl<T> HandleArray<T> {
     /// Creates a new [`HandleArray`].
     ///
-    /// `min_num_free_indices` - this many [`Handle`]'s need to be freed before
-    /// the oldest freed index will be reused with a new generation (sequence).
+    /// `min_num_free_indices` - see [`HandleManager::new`].
     ///
     /// All handles returned by this [`HandleArray`] will share the `metadata` value.
-    ///
-    /// [`Handle`]: struct.Handle.html
-    /// [`HandleArray`]: struct.HandleArray.html
     pub fn new(metadata: HandleMetadata, min_num_free_indices: HandleIndex) -> Self {
         Self {
             metadata,
@@ -40,154 +50,103 @@ impl<T> HandleArray<T> {
     }
 
     /// Inserts the `value` in the array, returning the [`Handle`] which may be used to
-    /// [`get`] / [`get_mut`] / [`remove`] it later.
+    /// [`get`](HandleArray::get) / [`get_mut`](HandleArray::get_mut) / [`remove`](HandleArray::remove) it later.
     ///
     /// # Panics
     ///
     /// Panics if this would insert more than [`MAX_HANDLES`] values.
-    ///
-    /// [`Handle`]: struct.Handle.html
-    /// [`get`]: #method.get
-    /// [`get_mut`]: #method.get_mut
-    /// [`remove`]: #method.remove
-    /// [`MAX_HANDLES`]: constant.MAX_HANDLES.html
     pub fn insert(&mut self, value: T) -> Handle {
         let handle = self.handle_manager.create(self.metadata);
-        let index = handle.index().expect("invalid handle") as usize;
+        let index = unsafe { debug_unwrap(handle.index(), "invalid handle") } as usize;
 
-        if index >= self.indices.len() {
-            self.indices.resize(index + 1, Self::INVALID_INDEX);
+        let object_index = self.array.len() as ObjectIndex;
+
+        if index == self.indices.len() {
+            debug_assert_eq!(index, self.indices.len());
+            self.indices.push(object_index);
+        } else {
+            debug_assert!(index < self.indices.len());
+            let object_index_ = unsafe { self.indices.get_unchecked_mut(index) };
+            debug_assert!(*object_index_ == INVALID_INDEX);
+            *object_index_ = object_index;
         }
 
-        debug_assert!(unsafe { *self.indices.get_unchecked(index) == Self::INVALID_INDEX });
-        *unsafe { self.indices.get_unchecked_mut(index) } = self.array.len() as HandleIndex;
         self.array.push(value);
 
         handle
     }
 
     /// Inserts the `value` in the array, returning the [`Handle`] which may be used to
-    /// [`get`] / [`get_mut`] / [`remove`] it later,
+    /// [`get`](HandleArray::get) / [`get_mut`](HandleArray::get_mut) / [`remove`](HandleArray::remove) it later,
     /// and the mutable reference to the inserted `value`.
     ///
     /// # Panics
     ///
     /// Panics if this would insert more than [`MAX_HANDLES`] values.
-    ///
-    /// [`Handle`]: struct.Handle.html
-    /// [`get`]: #method.get
-    /// [`get_mut`]: #method.get_mut
-    /// [`remove`]: #method.remove
-    /// [`MAX_HANDLES`]: constant.MAX_HANDLES.html
     pub fn insert_entry(&mut self, value: T) -> (Handle, &mut T) {
         let handle = self.insert(value);
 
-        (handle, self.array.last_mut().unwrap())
+        (handle, unsafe { debug_unwrap(self.array.last_mut(), "empty object array") })
     }
 
-    /// Returns `true` if the [`handle`] is valid - i.e. it was previously returned by [`insert`] / [`insert_entry`] by this [`HandleArray`]
-    /// and has not been [`removed`] yet.
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`insert`]: #method.insert
-    /// [`insert_entry`]: #method.insert_entry
-    /// [`HandleArray`]: struct.HandleArray.html
-    /// [`removed`]: #method.remove
+    /// Returns `true` if the [`Handle`] is valid - i.e. it was previously
+    /// returned by [`insert`](HandleArray::insert) / [`insert_entry`](HandleArray::insert_entry)
+    /// by this [`HandleArray`] and has not been [`removed`](HandleArray::remove) yet.
     pub fn is_valid(&self, handle: Handle) -> bool {
         self.is_valid_impl(handle).is_some()
     }
 
-    /// If the [`handle`] [`is_valid`], returns the reference to the `value` which was [`inserted`]
+    /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), returns the reference to the `value` which was [`inserted`](HandleArray::inserted)
     /// when this handle was returned by this [`HandleArray`].
     /// Else returns `None`.
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`is_valid`]: #method.is_valid
-    /// [`inserted`]: #method.insert
-    /// [`HandleArray`]: struct.HandleArray.html
     pub fn get(&self, handle: Handle) -> Option<&T> {
-        if let Some(index) = self.is_valid_impl(handle) {
-            debug_assert!((index as usize) < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index as usize) };
-
+        self.is_valid_impl(handle).map(|(_, object_index)| {
             debug_assert!((object_index as usize) < self.array.len());
-            Some(unsafe { self.array.get_unchecked(object_index as usize) })
-        } else {
-            None
-        }
+            unsafe { self.array.get_unchecked(object_index as usize) }
+        })
     }
 
-    /// If the [`handle`] [`is_valid`], returns the mutable reference to the `value` which was [`inserted`]
+    /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), returns the mutable reference to the `value` which was [`inserted`](HandleArray::inserted)
     /// when this handle was returned by this [`HandleArray`].
     /// Else returns `None`.
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`is_valid`]: #method.is_valid
-    /// [`inserted`]: #method.insert
-    /// [`HandleArray`]: struct.HandleArray.html
     pub fn get_mut(&mut self, handle: Handle) -> Option<&mut T> {
-        if let Some(index) = self.is_valid_impl(handle) {
-            debug_assert!((index as usize) < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index as usize) };
-
+        self.is_valid_impl(handle).map(move |(_, object_index)| {
             debug_assert!((object_index as usize) < self.array.len());
-            Some(unsafe { self.array.get_unchecked_mut(object_index as usize) })
-        } else {
-            None
-        }
+            unsafe { self.array.get_unchecked_mut(object_index as usize) }
+        })
     }
 
-    /// If the [`handle`] [`is_valid`], removes and returns the `value` which was [`inserted`]
-    /// when this handle was returned by this [`HandleArray`], and invalidates the [`handle`].
+    /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), removes and returns the `value` which was [`inserted`](HandleArray::inserted)
+    /// when this handle was returned by this [`HandleArray`], and invalidates the [`Handle`].
     /// Else returns `None`.
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`is_valid`]: #method.is_valid
-    /// [`inserted`]: #method.insert
-    /// [`HandleArray`]: struct.HandleArray.html
     pub fn remove(&mut self, handle: Handle) -> Option<T> {
-        if let Some(index) = self.is_valid_impl(handle) {
-            debug_assert!((index as usize) < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index as usize) };
-
+        self.is_valid_impl(handle).map(|(index, object_index)| {
             debug_assert!((object_index as usize) < self.array.len());
 
-            let destroyed = self.handle_manager.destroy(handle);
-            debug_assert!(destroyed);
+            self.handle_manager.destroy_by_index(index);
 
             // Move the last object to the free slot and patch its index in the index array.
-            *unsafe { self.indices.get_unchecked_mut(index as usize) } = Self::INVALID_INDEX;
+            *unsafe { self.indices.get_unchecked_mut(index as usize) } = INVALID_INDEX;
 
             debug_assert!(self.array.len() > 0);
-            let last_object_index = (self.array.len() - 1) as HandleIndex;
+            let last_object_index = (self.array.len() - 1) as ObjectIndex;
 
             if object_index != last_object_index {
-                for index in self.indices.iter_mut() {
-                    if *index == last_object_index {
-                        *index = object_index;
-                        break;
-                    }
-                }
+                self.indices
+                    .iter_mut()
+                    .find_map(|index| (*index == last_object_index).then(|| *index = object_index));
             }
 
-            Some(self.array.swap_remove(object_index as usize))
-        } else {
-            None
-        }
+            unsafe { swap_remove(&mut self.array, object_index as usize) }
+        })
     }
 
-    /// Returns the current number of valid [`handles`] / values, [`inserted`] in this [`HandleArray`].
-    ///
-    /// [`handles`]: struct.Handle.html
-    /// [`inserted`]: #method.insert
-    /// [`HandleArray`]: struct.HandleArray.html
+    /// Returns the current number of valid [`Handle`]'s / values, [`inserted`](HandleArray::inserted) in this [`HandleArray`].
     pub fn len(&self) -> usize {
         self.array.len()
     }
 
-    /// Returns `true` if [`len`] returns `0`.
-    ///
-    /// [`len`]: #method.len
+    /// Returns `true` if [`len`](HandleArray::len) returns `0`.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -196,28 +155,31 @@ impl<T> HandleArray<T> {
     /// (but only until they are allocated again).
     ///
     /// Has no effect on the allocated capacity of the internal data structures.
-    ///
-    /// [`HandleArray`]: struct.HandleArray.html
     pub fn clear(&mut self) {
         self.handle_manager.clear();
         self.indices.clear();
         self.array.clear();
     }
 
-    fn is_valid_impl(&self, handle: Handle) -> Option<HandleIndex> {
-        if let Some(metadata) = handle.metadata() {
-            if metadata != self.metadata {
-                return None;
-            }
-        } else {
-            return None;
-        }
-
-        self.handle_manager.is_valid_impl(handle)
+    /// Returns the tuple of (handle index, object index) for a valid `handle`.
+    fn is_valid_impl(&self, handle: Handle) -> Option<(HandleIndex, ObjectIndex)> {
+        handle
+            .metadata()
+            .and_then(|metadata| {
+                (metadata == self.metadata)
+                    .then(|| self.handle_manager.is_valid_impl(handle))
+                    .flatten()
+            })
+            .map(|index| {
+                debug_assert!((index as usize) < self.indices.len());
+                (index, *unsafe {
+                    self.indices.get_unchecked(index as usize)
+                })
+            })
     }
 }
 
-impl<T> std::ops::Deref for HandleArray<T> {
+impl<T> Deref for HandleArray<T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -225,13 +187,13 @@ impl<T> std::ops::Deref for HandleArray<T> {
     }
 }
 
-impl<T> std::ops::DerefMut for HandleArray<T> {
+impl<T> DerefMut for HandleArray<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.array.deref_mut()
     }
 }
 
-impl<T> std::iter::IntoIterator for HandleArray<T> {
+impl<T> IntoIterator for HandleArray<T> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 

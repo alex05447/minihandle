@@ -1,57 +1,81 @@
-use std::fmt::{Debug, Display, Formatter};
-use std::num::NonZeroU64;
+use {
+    static_assertions::*,
+    std::{
+        fmt::{Debug, Display, Formatter},
+        mem::size_of,
+        num::NonZeroU64,
+    },
+};
 
-/// HandleInner representation of a valid handle uses these many bits.
-type HandleInner = u64;
+/// Inner representation of a valid handle uses this many bits.
+pub type HandleInner = u64;
 
-/// HandleInner representation of the handle's index part.
+/// Inner representation of the handle's index part.
 /// NOTE - max valid index value is [`MAX_HANDLES`](constant.MAX_HANDLES.html), as some bits are reserved.
 pub type HandleIndex = u32;
 
-/// HandleInner representation of the handle's generation part.
+/// Inner representation of the handle's generation part.
 pub type HandleGeneration = u16;
 
-/// HandleInner representation of the handle's metadata part.
+/// Inner representation of the handle's metadata part.
 pub type HandleMetadata = u16;
 
+#[allow(dead_code)]
 const BITS_PER_BYTE: usize = 8;
 
 /// Bit sizes and offsets within the handle's inner representation of its reserved, index, generation and metadata parts.
 /// See the description of `Handle` for layout.
 
 const HANDLE_BITS: HandleInner = 64;
-const_assert!(_handle_bits; std::mem::size_of::<HandleInner>() * BITS_PER_BYTE == HANDLE_BITS as usize);
+const_assert_eq!(
+    size_of::<HandleInner>() * BITS_PER_BYTE,
+    HANDLE_BITS as usize
+);
+
+const VALID_HANDLE_RESERVED_BITS: HandleInner = 1;
 
 const RESERVED_BITS: HandleInner = 2;
 const RESERVED_OFFSET: HandleInner = 0;
-//const RESERVED_MASK: HandleInner = (1 << RESERVED_BITS) - 1;
+const RESERVED_MASK: HandleInner = (1 << RESERVED_BITS) - 1;
 
 const INDEX_BITS: HandleInner = 30;
-const_assert!(reserved_and_index_bits; std::mem::size_of::<HandleIndex>() * BITS_PER_BYTE == (RESERVED_BITS + INDEX_BITS) as usize);
+const_assert_eq!(
+    size_of::<HandleIndex>() * BITS_PER_BYTE,
+    (RESERVED_BITS + INDEX_BITS) as usize
+);
 
 const INDEX_OFFSET: HandleInner = RESERVED_OFFSET + RESERVED_BITS;
 const INDEX_MASK: HandleInner = (1 << INDEX_BITS) - 1;
 
-/// Maximum number of unique indices, representable by the [`Handle`](struct.Handle.html).
+/// Maximum number of unique indices, representable by the [`Handle`].
 pub const MAX_HANDLES: HandleIndex = INDEX_MASK as HandleIndex;
 
 const GENERATION_BITS: HandleInner = 16;
-const_assert!(generation_bits; std::mem::size_of::<HandleGeneration>() * BITS_PER_BYTE == GENERATION_BITS as usize);
+const_assert_eq!(
+    size_of::<HandleGeneration>() * BITS_PER_BYTE,
+    GENERATION_BITS as usize
+);
 
 const GENERATION_OFFSET: HandleInner = INDEX_OFFSET + INDEX_BITS;
 const GENERATION_MASK: HandleInner = (1 << GENERATION_BITS) - 1;
 
 const METADATA_BITS: HandleInner = 16;
-const_assert!(metadata_bits; std::mem::size_of::<HandleMetadata>() * BITS_PER_BYTE == METADATA_BITS as usize);
+const_assert_eq!(
+    size_of::<HandleMetadata>() * BITS_PER_BYTE,
+    METADATA_BITS as usize
+);
 
 const METADATA_OFFSET: HandleInner = GENERATION_OFFSET + GENERATION_BITS;
 const METADATA_MASK: HandleInner = (1 << METADATA_BITS) - 1;
 
-const_assert!(handle_bits; RESERVED_BITS + INDEX_BITS + GENERATION_BITS + METADATA_BITS == HANDLE_BITS);
+const_assert_eq!(
+    RESERVED_BITS + INDEX_BITS + GENERATION_BITS + METADATA_BITS,
+    HANDLE_BITS
+);
 
 /// Handle, a.k.a. weak reference, a.k.a. generational index.
 ///
-/// Some (array) `index` + `generation` (sequence) number, disambiguating reused indices, if any, solving the A-B-A problem.
+/// Some (array) `index` + `generation` (sequence / cycle) number, disambiguating reused indices, if any, solving the A-B-A problem.
 /// As well as a `metadata` part to disambiguate between handles of different types.
 ///
 /// See [http://bitsquid.blogspot.com/2014/08/building-data-oriented-entity-system.html](http://bitsquid.blogspot.com/2014/08/building-data-oriented-entity-system.html)
@@ -72,7 +96,7 @@ pub struct Handle(
     Option<NonZeroU64>,
 );
 
-const_assert!(handle_size; std::mem::size_of::<Handle>() * BITS_PER_BYTE == HANDLE_BITS as usize);
+const_assert_eq!(size_of::<Handle>() * BITS_PER_BYTE, HANDLE_BITS as usize);
 
 impl Display for Handle {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -97,110 +121,55 @@ impl Default for Handle {
 }
 
 impl Handle {
-    /// Creates an invalid [`handle`].
+    /// Creates an invalid [`Handle`].
     ///
-    /// [`index`], [`generation`] and [`metadata`] return `None` for an invalid [`handle`],
-    /// [`is_valid`] returns `false`.
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`index`]: #method.index
-    /// [`generation`]: #method.generation
-    /// [`metadata`]: #method.metadata
-    /// [`is_valid`]: #method.is_valid
+    /// [`index`](Handle::index), [`generation`](Handle::generation) and [`metadata`](Handle::metadata) return `None` for an invalid [`Handle`],
+    /// [`is_valid`](Handle::is_valid) returns `false`.
     pub fn invalid() -> Self {
         Self(None)
     }
 
-    /// Returns `true` if the [`handle`] is valid (i.e. was not created by [`invalid`] or [`default`]).
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`invalid`]: #method.invalid
-    /// [`default`]: #method.default
+    /// Returns `true` if the [`Handle`] is valid (i.e. was not created by [`invalid`](Handle::invalid) or [`default`](Handle::default)).
     pub fn is_valid(&self) -> bool {
         self.0.is_some()
     }
 
-    /// Builds a new [`handle`] from its components.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `index` value is larger then [`MAX_HANDLES`].
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`MAX_HANDLES`]: constant.MAX_HANDLES.html
-    pub fn new(index: HandleIndex, generation: HandleGeneration, metadata: HandleMetadata) -> Self {
-        assert!(
-            index < MAX_HANDLES,
-            "Handle index overflow - index is {}, but max index value is {}.",
-            index,
-            MAX_HANDLES
-        );
-
-        let handle = 1
-            | (index as u64 & INDEX_MASK) << INDEX_OFFSET
-            | (generation as u64 & GENERATION_MASK) << GENERATION_OFFSET
-            | (metadata as u64 & METADATA_MASK) << METADATA_OFFSET;
-
-        Self(Some(NonZeroU64::new(handle).unwrap()))
-    }
-
-    /// Attempts to build the [`handle`] from an opaque value, previously returned by [`to_inner`].
+    /// Attempts to build the [`Handle`] from an opaque value, previously returned by [`to_inner`](Handle::to_inner).
     ///
     /// Checks the reserved bits of the value.
-    /// If the reserved bits are unset (like they would be for a sufficienty aligned pointer),
+    /// If the reserved bits are null (like they would be for a sufficienty aligned pointer),
+    /// or they do not match the pattern used by valid [`Handle`]'s,
     /// `inner` does not represent a valid [`Handle`] and the function returns `None`.
     ///
-    /// Otherwise the function returns `Some`, but this does not guarantee that `inner` represents a [`Handle`].
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`to_inner`]: #method.to_inner
-    /// [`Handle`]: struct.Handle.html
+    /// Otherwise the function returns `Some`, but this by itself does not guarantee that `inner` represents an actual [`Handle`].
     pub fn from_inner(inner: HandleInner) -> Option<Self> {
-        // Valid handles have the reserved bits set to `1`.
-        if read_bits(inner, RESERVED_BITS, RESERVED_OFFSET) != 1 {
-            None
-        } else {
-            debug_assert!(inner > 0);
-            Some(Self(Some(NonZeroU64::new(inner).unwrap())))
-        }
+        NonZeroU64::new(inner).and_then(|handle| {
+            // Valid handles have the reserved bits set to `VALID_HANDLE_RESERVED_BITS`.
+            (Self::reserved_impl(handle) == VALID_HANDLE_RESERVED_BITS).then(|| Self(Some(handle)))
+        })
     }
 
-    /// If the [`handle`] is [`valid`], returns its (non-null) opaque internal representation, otherwise returns `None`.
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`valid`]: #method.is_valid.html
+    /// If the [`Handle`] is [`valid`](Handle::valid), returns its (non-null) opaque internal representation, otherwise returns `None`.
     pub fn into_inner(self) -> Option<HandleInner> {
         self.0.map(NonZeroU64::get)
     }
 
-    /// Extracts the [`handle`]'s index part, or `None` if the handle is not [`valid`].
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`valid`]: #method.is_valid.html
+    /// Extracts the [`Handle`]'s index part, or `None` if the handle is not [`valid`](Handle::valid).
     pub fn index(&self) -> Option<HandleIndex> {
         self.0.map(Self::index_impl)
     }
 
-    /// Extracts the [`handle`]'s generation part, or `None` if the handle is not [`valid`].
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`valid`]: #method.is_valid.html
+    /// Extracts the [`Handle`]'s generation part, or `None` if the handle is not [`valid`](Handle::valid).
     pub fn generation(&self) -> Option<HandleGeneration> {
         self.0.map(Self::generation_impl)
     }
 
-    /// Extracts the [`handle`]'s metadata part, or `None` if the handle is not [`valid`].
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`valid`]: #method.is_valid.html
+    /// Extracts the [`Handle`]'s metadata part, or `None` if the handle is not [`valid`](Handle::valid).
     pub fn metadata(&self) -> Option<HandleMetadata> {
         self.0.map(Self::metadata_impl)
     }
 
-    /// Extracts the [`handle`]'s index, generation and metadata parts, in that order, or `None` if the handle is not [`valid`].
-    ///
-    /// [`handle`]: struct.Handle.html
-    /// [`valid`]: #method.is_valid.html
+    /// Extracts the [`Handle`]'s index, generation and metadata parts, in that order, or `None` if the handle is not [`valid`](Handle::valid).
     pub fn unwrap(&self) -> Option<(HandleIndex, HandleGeneration, HandleMetadata)> {
         self.0.map(|h| {
             (
@@ -211,39 +180,83 @@ impl Handle {
         })
     }
 
+    /// Builds a new [`Handle`] from its components.
+    ///
+    /// The caller guarantees `index` is not greater than [`MAX_HANDLES`].
+    pub(crate) fn new(
+        index: HandleIndex,
+        generation: HandleGeneration,
+        metadata: HandleMetadata,
+    ) -> Self {
+        debug_assert!(
+            index <= MAX_HANDLES,
+            "handle index overflow - index is {}, but max index value is {}",
+            index,
+            MAX_HANDLES
+        );
+
+        let handle = (VALID_HANDLE_RESERVED_BITS as HandleInner & RESERVED_MASK) << RESERVED_OFFSET
+            | (index as HandleInner & INDEX_MASK) << INDEX_OFFSET
+            | (generation as HandleInner & GENERATION_MASK) << GENERATION_OFFSET
+            | (metadata as HandleInner & METADATA_MASK) << METADATA_OFFSET;
+
+        debug_assert!(handle > 0);
+        Self(Some(unsafe { NonZeroU64::new_unchecked(handle) }))
+    }
+
     fn index_impl(h: NonZeroU64) -> HandleIndex {
-        read_bits(h.get(), INDEX_BITS, INDEX_OFFSET) as HandleIndex
+        read_bits(h.get(), INDEX_BITS, INDEX_OFFSET) as _
     }
 
     fn generation_impl(h: NonZeroU64) -> HandleGeneration {
-        read_bits(h.get(), GENERATION_BITS, GENERATION_OFFSET) as HandleGeneration
+        read_bits(h.get(), GENERATION_BITS, GENERATION_OFFSET) as _
     }
 
     fn metadata_impl(h: NonZeroU64) -> HandleMetadata {
-        read_bits(h.get(), METADATA_BITS, METADATA_OFFSET) as HandleMetadata
+        read_bits(h.get(), METADATA_BITS, METADATA_OFFSET) as _
     }
 
-    /*
-        fn reserved(&self) -> Option<u8> {
-            if let Some(handle) = self.0 {
-                Some(
-                    read_bits(
-                        handle.get(),
-                        RESERVED_BITS,
-                        RESERVED_OFFSET
-                    ) as u8
-                )
-            } else {
-                None
-            }
-        }
-    */
+    fn reserved_impl(h: NonZeroU64) -> HandleInner {
+        read_bits(h.get(), RESERVED_BITS, RESERVED_OFFSET) as _
+    }
 }
 
-fn read_bits(source: HandleInner, num_bits_to_read: HandleInner, offset: HandleInner) -> HandleInner {
-    debug_assert!((num_bits_to_read + offset) <= HANDLE_BITS);
+//  7 6 5 4 3 2 1 0  <- bit index
+// |h_g_f_e_d_c_b_a|
+//            ^ ^
+//            |_|
+//              |
+// offset: 1, num_bits: 2
+//
+// Shifted by offset:
+// |?_h_g_f_e_d_c_b|
+//
+// Read mask:
+// |0_0_0_0_0_0_1_1|
+//         &
+// |?_h_g_f_e_d_c_b|
+//         =
+//             |c_b|
+fn read_bits(val: HandleInner, num_bits: HandleInner, offset: HandleInner) -> HandleInner {
+    debug_assert!((num_bits + offset) <= HANDLE_BITS);
 
-    let read_mask = (1 << num_bits_to_read) - 1;
+    let read_mask = (1 << num_bits) - 1;
 
-    (source >> offset) & read_mask
+    (val >> offset) & read_mask
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(
+        expected = "handle index overflow - index is 1073741824, but max index value is 1073741823"
+    )]
+    fn index_overflow() {
+        let max_index = 1073741823;
+        let _ = Handle::new(max_index, 0, 0);
+        let _ = Handle::new(max_index + 1, 0, 0);
+    }
 }
