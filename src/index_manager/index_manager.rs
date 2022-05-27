@@ -1,9 +1,35 @@
 use num_traits::{FromPrimitive, PrimInt, Unsigned};
 
-/// Trait for the index type used by the [`IndexManager`] - a primitive unsigned integer.
-pub trait Index: PrimInt + Unsigned + FromPrimitive {}
+pub trait ToUsize {
+    fn to_usize(self) -> usize;
+}
 
-impl<T: PrimInt + Unsigned + FromPrimitive> Index for T {}
+macro_rules! impl_to_usize {
+    ($T:ty) => {
+        impl ToUsize for $T {
+            fn to_usize(self) -> usize {
+                self as _
+            }
+        }
+    };
+}
+
+impl_to_usize!(u8);
+impl_to_usize!(u16);
+impl_to_usize!(u32);
+impl_to_usize!(usize);
+
+#[cfg(target_pointer_width = "64")]
+impl ToUsize for u64 {
+    fn to_usize(self) -> usize {
+        self as _
+    }
+}
+
+/// Trait for the index type used by the [`IndexManager`] - a primitive unsigned integer convertible to `usize`.
+pub trait Index: PrimInt + Unsigned + FromPrimitive + ToUsize {}
+
+impl<T: PrimInt + Unsigned + FromPrimitive + ToUsize> Index for T {}
 
 /// Like [`HandleManager`](crate::HandleManager), but uses a simple [`index`](Index) instead of a
 /// generational handle.
@@ -55,7 +81,7 @@ impl<I: Index> IndexManager<I> {
     /// Returns `true` if the [`index`](Index) is valid - i.e. it was previously [`created`](IndexManager::create) by this [`IndexManager`]
     /// and has not been [`destroyed`](IndexManager::destroy) yet.
     ///
-    /// NOTE: unlike [`HandleManager`], this does not protect against the A-B-A problem -
+    /// NOTE: unlike [`HandleManager`](crate::HandleManager), this does not protect against the A-B-A problem -
     /// a reallocated [`index`](Index) will be considered valid.
     pub fn is_valid(&self, index: I) -> bool {
         (index < self.next_index) && !self.free_indices.contains(&index)
@@ -64,7 +90,7 @@ impl<I: Index> IndexManager<I> {
     /// Destoys the [`index`](Index), i.e. makes [`is_valid`](IndexManager::is_valid) by this [`IndexManager`] return `false` for it.
     /// Returns `true` if the [`index`](Index) was [`valid`](IndexManager::is_valid) and was destroyed; else return `false`.
     ///
-    /// NOTE: unlike [`HandleManager`], this does not protect against the A-B-A problem -
+    /// NOTE: unlike [`HandleManager`](crate::HandleManager), this does not protect against the A-B-A problem -
     /// a reallocated [`index`](Index) will be considered valid.
     pub fn destroy(&mut self, index: I) -> bool {
         if !self.is_valid(index) {

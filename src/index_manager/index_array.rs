@@ -16,7 +16,8 @@ use {
 ///
 /// Intended for use cases where the user has full control over index lifetime
 /// and requires just a simple array index indirection the [`IndexArray`] provides.
-pub struct IndexArray<T, I>
+#[derive(Clone)]
+pub struct IndexArray<I, T>
 where
     I: Index,
 {
@@ -28,7 +29,7 @@ where
     array: Vec<T>,
 }
 
-impl<T, I> IndexArray<T, I>
+impl<I, T> IndexArray<I, T>
 where
     I: Index,
 {
@@ -54,7 +55,7 @@ where
     /// Panics if this would insert enough objects to overflow the underlying [`index`](Index) type.
     pub fn insert(&mut self, value: T) -> I {
         let index = self.index_manager.create();
-        let index_usize = index.to_usize().expect("index not convertible to usize");
+        let index_usize = index.to_usize();
 
         // Needs `Bounded::max_value()` to be `const`.
         // let invalid_index = Self::INVALID_INDEX;
@@ -88,7 +89,9 @@ where
     pub fn insert_entry(&mut self, value: T) -> (I, &mut T) {
         let index = self.insert(value);
 
-        (index, unsafe { debug_unwrap(self.array.last_mut(), "empty object array") })
+        (index, unsafe {
+            debug_unwrap(self.array.last_mut(), "empty object array")
+        })
     }
 
     /// Returns `true` if the [`index`](Index) is valid - i.e. it was previously
@@ -101,34 +104,69 @@ where
         self.index_manager.is_valid(index)
     }
 
-    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), returns the reference to the `value` which was [`inserted`](IndexArray::inserted)
-    /// when this handle was returned by this [`IndexArray`].
+    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), returns the reference to the `value` which was [`inserted`](IndexArray::insert)
+    /// when this index was returned by this [`IndexArray`].
     /// Else returns `None`.
     ///
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
     /// a reallocated [`index`](Index) will be considered valid.
     pub fn get(&self, index: I) -> Option<&T> {
-        self.is_valid_impl(index).map(|(_, _, object_index_usize)| {
-            debug_assert!(object_index_usize < self.array.len());
-            unsafe { self.array.get_unchecked(object_index_usize) }
+        self.is_valid_impl(index).map(|(_, object_index)| {
+            debug_assert!(object_index.to_usize() < self.array.len());
+            unsafe { self.array.get_unchecked(object_index.to_usize()) }
         })
     }
 
-    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), returns the mutable reference to the `value` which was [`inserted`](IndexArray::inserted)
-    /// when this handle was returned by this [`IndexArray`].
+    /// Returns the reference to the `value` which was [`inserted`](IndexArray::insert)
+    /// when this index was returned by this [`IndexArray`],
+    /// without checking the [`index`](Index) for [`validity`](IndexArray::is_valid).
+    ///
+    /// # Safety
+    ///
+    /// The caller guarantees [`index`](Index) [`is_valid`](IndexArray::is_valid).
+    pub unsafe fn get_unchecked(&self, index: I) -> &T {
+        let index_usize = index.to_usize();
+
+        debug_assert!(index_usize < self.indices.len());
+        let object_index = *self.indices.get_unchecked(index_usize);
+        let object_index_usize = object_index.to_usize();
+
+        debug_assert!(object_index_usize < self.array.len());
+        self.array.get_unchecked(object_index_usize)
+    }
+
+    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), returns the mutable reference to the `value` which was [`inserted`](IndexArray::insert)
+    /// when this index was returned by this [`IndexArray`].
     /// Else returns `None`.
     ///
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
     /// a reallocated [`index`](Index) will be considered valid.
     pub fn get_mut(&mut self, index: I) -> Option<&mut T> {
-        self.is_valid_impl(index)
-            .map(move |(_, _, object_index_usize)| {
-                debug_assert!(object_index_usize < self.array.len());
-                unsafe { self.array.get_unchecked_mut(object_index_usize) }
-            })
+        self.is_valid_impl(index).map(move |(_, object_index)| {
+            debug_assert!(object_index.to_usize() < self.array.len());
+            unsafe { self.array.get_unchecked_mut(object_index.to_usize()) }
+        })
     }
 
-    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), removes and returns the `value` which was [`inserted`](IndexArray::inserted)
+    /// Returns the mutable reference to the `value` which was [`inserted`](IndexArray::insert)
+    /// when this index was returned by this [`IndexArray`],
+    /// without checking the [`index`](Index) for [`validity`](IndexArray::is_valid).
+    ///
+    /// # Safety
+    ///
+    /// The caller guarantees [`index`](Index) [`is_valid`](IndexArray::is_valid).
+    pub unsafe fn get_unchecked_mut(&mut self, index: I) -> &mut T {
+        let index_usize = index.to_usize();
+
+        debug_assert!(index_usize < self.indices.len());
+        let object_index = *self.indices.get_unchecked(index_usize);
+        let object_index_usize = object_index.to_usize();
+
+        debug_assert!(object_index_usize < self.array.len());
+        self.array.get_unchecked_mut(object_index_usize)
+    }
+
+    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), removes and returns the `value` which was [`inserted`](IndexArray::insert)
     /// when this handle was returned by this [`IndexArray`], and invalidates the [`index`](Index).
     /// Else returns `None`.
     ///
@@ -136,8 +174,8 @@ where
     /// a reallocated [`index`](Index) will be considered valid.
     pub fn remove(&mut self, index: I) -> Option<T> {
         self.is_valid_impl(index)
-            .map(|(index_usize, object_index, object_index_usize)| {
-                debug_assert!(object_index_usize < self.array.len());
+            .map(|(index_usize, object_index)| {
+                debug_assert!(object_index.to_usize() < self.array.len());
 
                 self.index_manager.destroy_impl(index);
 
@@ -158,11 +196,11 @@ where
                     });
                 }
 
-                unsafe { swap_remove(&mut self.array, object_index_usize) }
+                unsafe { swap_remove(&mut self.array, object_index.to_usize()) }
             })
     }
 
-    /// Returns the current number of valid [`indices`](Index) / values, [`inserted`](IndexArray::inserted) in this [`IndexArray`].
+    /// Returns the current number of valid [`indices`](Index) / values, [`inserted`](IndexArray::insert) in this [`IndexArray`].
     pub fn len(&self) -> usize {
         self.array.len()
     }
@@ -182,26 +220,40 @@ where
         self.array.clear();
     }
 
+    /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid),
+    /// returns the index of the indice's object in the internal slice the [`IndexArray`] derefs to.
+    pub fn object_index(&self, index: I) -> Option<I> {
+        self.is_valid_impl(index)
+            .map(|(_, object_index)| object_index)
+    }
+
+    /// Returns the index of the [`index`](Index)'s object in the internal slice the [`IndexArray`] derefs to
+    /// without checking the [`index`](Index) for [`validity`](IndexArray::is_valid).
+    ///
+    /// # Safety
+    ///
+    /// The caller guarantees [`index`](Index) [`is_valid`](IndexArray::is_valid).
+    pub unsafe fn object_index_unchecked(&self, index: I) -> I {
+        let index_usize = index.to_usize();
+
+        debug_assert!(index_usize < self.indices.len());
+        *self.indices.get_unchecked(index_usize)
+    }
+
     /// Returns the tuple of (index (as usize), object index, object index (as usize)) for a valid `index`.
-    fn is_valid_impl(&self, index: I) -> Option<(usize, I, usize)> {
+    fn is_valid_impl(&self, index: I) -> Option<(usize, I)> {
         self.index_manager.is_valid(index).then(|| {
-            let index_usize = index.to_usize().expect("index not convertible to usize");
+            let index_usize = index.to_usize();
 
             debug_assert!(index_usize < self.indices.len());
             let object_index = *unsafe { self.indices.get_unchecked(index_usize) };
 
-            (
-                index_usize,
-                object_index,
-                object_index
-                    .to_usize()
-                    .expect("index not convertible to usize"),
-            )
+            (index_usize, object_index)
         })
     }
 }
 
-impl<T, I> Deref for IndexArray<T, I>
+impl<I, T> Deref for IndexArray<I, T>
 where
     I: Index,
 {
@@ -212,7 +264,7 @@ where
     }
 }
 
-impl<T, I> DerefMut for IndexArray<T, I>
+impl<I, T> DerefMut for IndexArray<I, T>
 where
     I: Index,
 {
@@ -221,7 +273,7 @@ where
     }
 }
 
-impl<T, I> IntoIterator for IndexArray<T, I>
+impl<I, T> IntoIterator for IndexArray<I, T>
 where
     I: Index,
 {
@@ -249,6 +301,7 @@ mod tests {
         assert_eq!(ia.len(), 1);
 
         assert_eq!(ia.get(index_0), Some(&7));
+        assert_eq!(ia.object_index(index_0), Some(0));
 
         let index_1 = ia.insert(9);
 
@@ -257,6 +310,7 @@ mod tests {
         assert_eq!(ia.len(), 2);
 
         assert_eq!(ia.get(index_1), Some(&9));
+        assert_eq!(ia.object_index(index_1), Some(1));
 
         for val in ia.iter() {
             assert!(*val == 7 || *val == 9)
@@ -287,15 +341,23 @@ mod tests {
         assert!(ia.is_valid(index_1));
         assert_eq!(ia.len(), 1);
 
+        assert_eq!(ia.object_index(index_0), None);
+        assert_eq!(ia.object_index(index_1), Some(0));
+
         let index_2 = ia.insert(1); // <- reuses index `0`.
 
-        assert!(ia.is_valid(index_0)); // <- reuses index `0`.
+        assert!(ia.is_valid(index_0)); // <- ABA
         assert!(ia.is_valid(index_1));
         assert!(ia.is_valid(index_2));
         assert_eq!(ia.len(), 2);
 
-        assert_eq!(ia.get(index_0), Some(&1)); // <- reuses index `0`.
+        assert_eq!(ia.get(index_0), Some(&1)); // <- ABA
+        assert_eq!(ia.get(index_1), Some(&43));
         assert_eq!(ia.get(index_2), Some(&1));
+
+        assert_eq!(ia.object_index(index_0), Some(1)); // <- ABA
+        assert_eq!(ia.object_index(index_1), Some(0));
+        assert_eq!(ia.object_index(index_2), Some(1));
 
         let removed_2 = ia.remove(index_2);
         assert_eq!(removed_2, Some(1));
@@ -305,6 +367,10 @@ mod tests {
         assert!(!ia.is_valid(index_2));
         assert_eq!(ia.len(), 1);
 
+        assert_eq!(ia.object_index(index_0), None);
+        assert_eq!(ia.object_index(index_1), Some(0));
+        assert_eq!(ia.object_index(index_2), None);
+
         let removed_1 = ia.remove(index_1);
         assert_eq!(removed_1, Some(43));
 
@@ -312,6 +378,10 @@ mod tests {
         assert!(!ia.is_valid(index_1));
         assert!(!ia.is_valid(index_2));
         assert_eq!(ia.len(), 0);
+
+        assert_eq!(ia.object_index(index_0), None);
+        assert_eq!(ia.object_index(index_1), None);
+        assert_eq!(ia.object_index(index_2), None);
     }
 
     #[test]

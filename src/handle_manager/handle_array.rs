@@ -17,6 +17,7 @@ type ObjectIndex = HandleIndex;
 /// Derefs to a `[T]` slice.
 ///
 /// Also known as a pool, or a typed arena (TODO: consider renaming?).
+#[derive(Clone)]
 pub struct HandleArray<T> {
     /// All handles returned by this handle array share this metadata value.
     metadata: HandleMetadata,
@@ -86,7 +87,9 @@ impl<T> HandleArray<T> {
     pub fn insert_entry(&mut self, value: T) -> (Handle, &mut T) {
         let handle = self.insert(value);
 
-        (handle, unsafe { debug_unwrap(self.array.last_mut(), "empty object array") })
+        (handle, unsafe {
+            debug_unwrap(self.array.last_mut(), "empty object array")
+        })
     }
 
     /// Returns `true` if the [`Handle`] is valid - i.e. it was previously
@@ -96,7 +99,7 @@ impl<T> HandleArray<T> {
         self.is_valid_impl(handle).is_some()
     }
 
-    /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), returns the reference to the `value` which was [`inserted`](HandleArray::inserted)
+    /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), returns the reference to the `value` which was [`inserted`](HandleArray::insert)
     /// when this handle was returned by this [`HandleArray`].
     /// Else returns `None`.
     pub fn get(&self, handle: Handle) -> Option<&T> {
@@ -106,7 +109,7 @@ impl<T> HandleArray<T> {
         })
     }
 
-    /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), returns the mutable reference to the `value` which was [`inserted`](HandleArray::inserted)
+    /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), returns the mutable reference to the `value` which was [`inserted`](HandleArray::insert)
     /// when this handle was returned by this [`HandleArray`].
     /// Else returns `None`.
     pub fn get_mut(&mut self, handle: Handle) -> Option<&mut T> {
@@ -116,7 +119,7 @@ impl<T> HandleArray<T> {
         })
     }
 
-    /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), removes and returns the `value` which was [`inserted`](HandleArray::inserted)
+    /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), removes and returns the `value` which was [`inserted`](HandleArray::insert)
     /// when this handle was returned by this [`HandleArray`], and invalidates the [`Handle`].
     /// Else returns `None`.
     pub fn remove(&mut self, handle: Handle) -> Option<T> {
@@ -141,7 +144,7 @@ impl<T> HandleArray<T> {
         })
     }
 
-    /// Returns the current number of valid [`Handle`]'s / values, [`inserted`](HandleArray::inserted) in this [`HandleArray`].
+    /// Returns the current number of valid [`Handle`]'s / values, [`inserted`](HandleArray::insert) in this [`HandleArray`].
     pub fn len(&self) -> usize {
         self.array.len()
     }

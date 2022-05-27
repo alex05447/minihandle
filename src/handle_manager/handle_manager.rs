@@ -1,6 +1,7 @@
 use {crate::*, std::collections::VecDeque};
 
 /// Creates, validates and destroys [`Handle`]'s, a.k.a. weak references, a.k.a. generational indices.
+#[derive(Clone)]
 pub struct HandleManager {
     min_num_free_indices: HandleIndex,
     num_handles: HandleIndex,

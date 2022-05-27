@@ -134,7 +134,7 @@ impl Handle {
         self.0.is_some()
     }
 
-    /// Attempts to build the [`Handle`] from an opaque value, previously returned by [`to_inner`](Handle::to_inner).
+    /// Attempts to build the [`Handle`] from an opaque value, previously returned by [`into_inner`](Handle::into_inner).
     ///
     /// Checks the reserved bits of the value.
     /// If the reserved bits are null (like they would be for a sufficienty aligned pointer),
@@ -149,27 +149,27 @@ impl Handle {
         })
     }
 
-    /// If the [`Handle`] is [`valid`](Handle::valid), returns its (non-null) opaque internal representation, otherwise returns `None`.
+    /// If the [`Handle`] is [`valid`](Handle::is_valid), returns its (non-null) opaque internal representation, otherwise returns `None`.
     pub fn into_inner(self) -> Option<HandleInner> {
         self.0.map(NonZeroU64::get)
     }
 
-    /// Extracts the [`Handle`]'s index part, or `None` if the handle is not [`valid`](Handle::valid).
+    /// Extracts the [`Handle`]'s index part, or `None` if the handle is not [`valid`](Handle::is_valid).
     pub fn index(&self) -> Option<HandleIndex> {
         self.0.map(Self::index_impl)
     }
 
-    /// Extracts the [`Handle`]'s generation part, or `None` if the handle is not [`valid`](Handle::valid).
+    /// Extracts the [`Handle`]'s generation part, or `None` if the handle is not [`valid`](Handle::is_valid).
     pub fn generation(&self) -> Option<HandleGeneration> {
         self.0.map(Self::generation_impl)
     }
 
-    /// Extracts the [`Handle`]'s metadata part, or `None` if the handle is not [`valid`](Handle::valid).
+    /// Extracts the [`Handle`]'s metadata part, or `None` if the handle is not [`valid`](Handle::is_valid).
     pub fn metadata(&self) -> Option<HandleMetadata> {
         self.0.map(Self::metadata_impl)
     }
 
-    /// Extracts the [`Handle`]'s index, generation and metadata parts, in that order, or `None` if the handle is not [`valid`](Handle::valid).
+    /// Extracts the [`Handle`]'s index, generation and metadata parts, in that order, or `None` if the handle is not [`valid`](Handle::is_valid).
     pub fn unwrap(&self) -> Option<(HandleIndex, HandleGeneration, HandleMetadata)> {
         self.0.map(|h| {
             (
