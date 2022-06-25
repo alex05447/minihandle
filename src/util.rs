@@ -1,22 +1,7 @@
-fn debug_unreachable(msg: &'static str) -> ! {
-    if cfg!(debug_assertions) {
-        unreachable!("{}", msg)
-    } else {
-        unsafe { std::hint::unreachable_unchecked() }
-    }
-}
-
-pub(crate) unsafe fn debug_unwrap<T>(val: Option<T>, msg: &'static str) -> T {
-    if let Some(val) = val {
-        val
-    } else {
-        debug_unreachable(msg)
-    }
-}
-
 /// `Vec::swap_remove`, but without a panic.
+///
 /// The caller guarantess `index` is strictly less than `vec.len()`.
-pub(crate) unsafe fn swap_remove<T>(vec: &mut Vec<T>, index: usize) -> T {
+pub(crate) unsafe fn swap_remove_unchecked<T>(vec: &mut Vec<T>, index: usize) -> T {
     let len = vec.len();
     debug_assert!(index < len);
 

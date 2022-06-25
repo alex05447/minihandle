@@ -1,5 +1,6 @@
 use {
     crate::*,
+    miniunchecked::*,
     static_assertions::*,
     std::{
         iter::IntoIterator,
@@ -58,16 +59,14 @@ impl<T> HandleArray<T> {
     /// Panics if this would insert more than [`MAX_HANDLES`] values.
     pub fn insert(&mut self, value: T) -> Handle {
         let handle = self.handle_manager.create(self.metadata);
-        let index = unsafe { debug_unwrap(handle.index(), "invalid handle") } as usize;
+        let index = unsafe { handle.index().unwrap_unchecked_dbg_msg("invalid handle") } as usize;
 
         let object_index = self.array.len() as ObjectIndex;
 
         if index == self.indices.len() {
-            debug_assert_eq!(index, self.indices.len());
             self.indices.push(object_index);
         } else {
-            debug_assert!(index < self.indices.len());
-            let object_index_ = unsafe { self.indices.get_unchecked_mut(index) };
+            let object_index_ = unsafe { self.indices.get_unchecked_mut_dbg(index) };
             debug_assert!(*object_index_ == INVALID_INDEX);
             *object_index_ = object_index;
         }
@@ -88,7 +87,9 @@ impl<T> HandleArray<T> {
         let handle = self.insert(value);
 
         (handle, unsafe {
-            debug_unwrap(self.array.last_mut(), "empty object array")
+            self.array
+                .last_mut()
+                .unwrap_unchecked_dbg_msg("empty object array")
         })
     }
 
@@ -103,20 +104,18 @@ impl<T> HandleArray<T> {
     /// when this handle was returned by this [`HandleArray`].
     /// Else returns `None`.
     pub fn get(&self, handle: Handle) -> Option<&T> {
-        self.is_valid_impl(handle).map(|(_, object_index)| {
-            debug_assert!((object_index as usize) < self.array.len());
-            unsafe { self.array.get_unchecked(object_index as usize) }
-        })
+        self.is_valid_impl(handle)
+            .map(|(_, object_index)| unsafe { self.array.get_unchecked_dbg(object_index as usize) })
     }
 
     /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), returns the mutable reference to the `value` which was [`inserted`](HandleArray::insert)
     /// when this handle was returned by this [`HandleArray`].
     /// Else returns `None`.
     pub fn get_mut(&mut self, handle: Handle) -> Option<&mut T> {
-        self.is_valid_impl(handle).map(move |(_, object_index)| {
-            debug_assert!((object_index as usize) < self.array.len());
-            unsafe { self.array.get_unchecked_mut(object_index as usize) }
-        })
+        self.is_valid_impl(handle)
+            .map(move |(_, object_index)| unsafe {
+                self.array.get_unchecked_mut_dbg(object_index as usize)
+            })
     }
 
     /// If the [`Handle`] [`is_valid`](HandleArray::is_valid), removes and returns the `value` which was [`inserted`](HandleArray::insert)
@@ -129,7 +128,7 @@ impl<T> HandleArray<T> {
             self.handle_manager.destroy_by_index(index);
 
             // Move the last object to the free slot and patch its index in the index array.
-            *unsafe { self.indices.get_unchecked_mut(index as usize) } = INVALID_INDEX;
+            *unsafe { self.indices.get_unchecked_mut_dbg(index as usize) } = INVALID_INDEX;
 
             debug_assert!(self.array.len() > 0);
             let last_object_index = (self.array.len() - 1) as ObjectIndex;
@@ -140,7 +139,7 @@ impl<T> HandleArray<T> {
                     .find_map(|index| (*index == last_object_index).then(|| *index = object_index));
             }
 
-            unsafe { swap_remove(&mut self.array, object_index as usize) }
+            unsafe { swap_remove_unchecked(&mut self.array, object_index as usize) }
         })
     }
 
@@ -174,9 +173,8 @@ impl<T> HandleArray<T> {
                     .flatten()
             })
             .map(|index| {
-                debug_assert!((index as usize) < self.indices.len());
                 (index, *unsafe {
-                    self.indices.get_unchecked(index as usize)
+                    self.indices.get_unchecked_dbg(index as usize)
                 })
             })
     }

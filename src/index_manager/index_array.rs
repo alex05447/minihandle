@@ -1,5 +1,6 @@
 use {
     crate::*,
+    miniunchecked::*,
     std::{
         iter::IntoIterator,
         ops::{Deref, DerefMut},
@@ -68,8 +69,7 @@ where
             debug_assert_eq!(index_usize, self.indices.len());
             self.indices.push(object_index);
         } else {
-            debug_assert!(index_usize < self.indices.len());
-            let object_index_ = unsafe { self.indices.get_unchecked_mut(index_usize) };
+            let object_index_ = unsafe { self.indices.get_unchecked_mut_dbg(index_usize) };
             debug_assert!(*object_index_ == invalid_index);
             *object_index_ = object_index;
         }
@@ -90,7 +90,9 @@ where
         let index = self.insert(value);
 
         (index, unsafe {
-            debug_unwrap(self.array.last_mut(), "empty object array")
+            self.array
+                .last_mut()
+                .unwrap_unchecked_dbg_msg("empty object array")
         })
     }
 
@@ -111,9 +113,8 @@ where
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
     /// a reallocated [`index`](Index) will be considered valid.
     pub fn get(&self, index: I) -> Option<&T> {
-        self.is_valid_impl(index).map(|(_, object_index)| {
-            debug_assert!(object_index.to_usize() < self.array.len());
-            unsafe { self.array.get_unchecked(object_index.to_usize()) }
+        self.is_valid_impl(index).map(|(_, object_index)| unsafe {
+            self.array.get_unchecked_dbg(object_index.to_usize())
         })
     }
 
@@ -127,12 +128,10 @@ where
     pub unsafe fn get_unchecked(&self, index: I) -> &T {
         let index_usize = index.to_usize();
 
-        debug_assert!(index_usize < self.indices.len());
-        let object_index = *self.indices.get_unchecked(index_usize);
+        let object_index = *self.indices.get_unchecked_dbg(index_usize);
         let object_index_usize = object_index.to_usize();
 
-        debug_assert!(object_index_usize < self.array.len());
-        self.array.get_unchecked(object_index_usize)
+        self.array.get_unchecked_dbg(object_index_usize)
     }
 
     /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), returns the mutable reference to the `value` which was [`inserted`](IndexArray::insert)
@@ -142,10 +141,10 @@ where
     /// NOTE: unlike [`HandleArray`], this does not protect against the A-B-A problem -
     /// a reallocated [`index`](Index) will be considered valid.
     pub fn get_mut(&mut self, index: I) -> Option<&mut T> {
-        self.is_valid_impl(index).map(move |(_, object_index)| {
-            debug_assert!(object_index.to_usize() < self.array.len());
-            unsafe { self.array.get_unchecked_mut(object_index.to_usize()) }
-        })
+        self.is_valid_impl(index)
+            .map(move |(_, object_index)| unsafe {
+                self.array.get_unchecked_mut_dbg(object_index.to_usize())
+            })
     }
 
     /// Returns the mutable reference to the `value` which was [`inserted`](IndexArray::insert)
@@ -158,12 +157,10 @@ where
     pub unsafe fn get_unchecked_mut(&mut self, index: I) -> &mut T {
         let index_usize = index.to_usize();
 
-        debug_assert!(index_usize < self.indices.len());
-        let object_index = *self.indices.get_unchecked(index_usize);
+        let object_index = *self.indices.get_unchecked_dbg(index_usize);
         let object_index_usize = object_index.to_usize();
 
-        debug_assert!(object_index_usize < self.array.len());
-        self.array.get_unchecked_mut(object_index_usize)
+        self.array.get_unchecked_mut_dbg(object_index_usize)
     }
 
     /// If the [`index`](Index) [`is_valid`](IndexArray::is_valid), removes and returns the `value` which was [`inserted`](IndexArray::insert)
@@ -184,7 +181,7 @@ where
                 let invalid_index = I::max_value();
 
                 // Move the last object to the free slot and patch its index in the index array.
-                *unsafe { self.indices.get_unchecked_mut(index_usize) } = invalid_index;
+                *unsafe { self.indices.get_unchecked_mut_dbg(index_usize) } = invalid_index;
 
                 debug_assert!(self.array.len() > 0);
                 let last_object_index =
@@ -196,7 +193,7 @@ where
                     });
                 }
 
-                unsafe { swap_remove(&mut self.array, object_index.to_usize()) }
+                unsafe { swap_remove_unchecked(&mut self.array, object_index.to_usize()) }
             })
     }
 
@@ -235,9 +232,7 @@ where
     /// The caller guarantees [`index`](Index) [`is_valid`](IndexArray::is_valid).
     pub unsafe fn object_index_unchecked(&self, index: I) -> I {
         let index_usize = index.to_usize();
-
-        debug_assert!(index_usize < self.indices.len());
-        *self.indices.get_unchecked(index_usize)
+        *self.indices.get_unchecked_dbg(index_usize)
     }
 
     /// Returns the tuple of (index (as usize), object index, object index (as usize)) for a valid `index`.
@@ -245,8 +240,7 @@ where
         self.index_manager.is_valid(index).then(|| {
             let index_usize = index.to_usize();
 
-            debug_assert!(index_usize < self.indices.len());
-            let object_index = *unsafe { self.indices.get_unchecked(index_usize) };
+            let object_index = *unsafe { self.indices.get_unchecked_dbg(index_usize) };
 
             (index_usize, object_index)
         })

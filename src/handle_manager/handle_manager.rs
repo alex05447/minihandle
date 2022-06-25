@@ -1,4 +1,4 @@
-use {crate::*, std::collections::VecDeque};
+use {crate::*, miniunchecked::*, std::collections::VecDeque};
 
 /// Creates, validates and destroys [`Handle`]'s, a.k.a. weak references, a.k.a. generational indices.
 #[derive(Clone)]
@@ -37,10 +37,9 @@ impl HandleManager {
     pub fn create(&mut self, metadata: HandleMetadata) -> Handle {
         let index = if self.free_indices.len() > self.min_num_free_indices as usize {
             unsafe {
-                debug_unwrap(
-                    self.free_indices.pop_front(),
-                    "free index queue is not empty",
-                )
+                self.free_indices
+                    .pop_front()
+                    .unwrap_unchecked_dbg_msg("free index queue is not empty")
             }
         } else {
             assert!(
@@ -53,8 +52,7 @@ impl HandleManager {
             index
         };
 
-        debug_assert!((index as usize) < self.generations.len());
-        let generation = *unsafe { self.generations.get_unchecked(index as usize) };
+        let generation = *unsafe { self.generations.get_unchecked_dbg(index as usize) };
 
         self.num_handles += 1;
 
@@ -124,8 +122,7 @@ impl HandleManager {
     /// Destroys a handle by its index.
     /// The caller guarantees `index` is a valid handle index, returned by [`is_valid_impl`](HandleManager::is_valid_impl) immediately before.
     pub(crate) fn destroy_by_index(&mut self, index: HandleIndex) {
-        debug_assert!((index as usize) < self.generations.len());
-        let generation = unsafe { self.generations.get_unchecked_mut(index as usize) };
+        let generation = unsafe { self.generations.get_unchecked_mut_dbg(index as usize) };
         Self::destroy_impl(
             index,
             &mut self.num_handles,
