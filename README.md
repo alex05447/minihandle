@@ -7,4 +7,10 @@ See [http://bitsquid.blogspot.com/2014/08/building-data-oriented-entity-system.h
 
 ## Features
 
-"index" (disabled by default) - provides a simplified implementation of an index manager / array which doesn't handle the generation/sequence/cycle number.
+`"index"` (disabled by default) - provides a simplified implementation of an index manager / array which doesn't handle the generation/sequence/cycle number.
+
+## Dependencies:
+
+- [`static_assertions`](https://crates.io/crates/static_assertions)
+- [`num-traits`](https://crates.io/crates/num-traits (optional, used by the `"index"` feature))
+- path dependency on [`miniunchecked`](https://github.com/alex05447/miniunchecked) (TODO: Github dependency?)
